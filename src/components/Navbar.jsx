@@ -25,7 +25,7 @@ export const BRANCHES = [
   'Verkių'
 ];
 
-export const Navbar = ({ selectedBranch, setSelectedBranch, onOpenExcelExport }) => {
+export const Navbar = ({ selectedBranch, setSelectedBranch }) => {
   const { userProfile, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -39,6 +39,17 @@ export const Navbar = ({ selectedBranch, setSelectedBranch, onOpenExcelExport })
 
   return (
     <>
+      {/* ── Navbar logo ring keyframe (injected once) ── */}
+      <style>{`
+        @keyframes nav-ring-spin {
+          to { stroke-dashoffset: -220; }
+        }
+        @keyframes nav-logo-pulse {
+          0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0), 0 0 14px rgba(245,158,11,0.35); }
+          50%      { box-shadow: 0 0 0 5px rgba(245,158,11,0.1), 0 0 18px rgba(245,158,11,0.5); }
+        }
+      `}</style>
+
       {/* ─── Sticky Header ─────────────────────────────── */}
       <header className="app-header">
         <div
@@ -61,14 +72,39 @@ export const Navbar = ({ selectedBranch, setSelectedBranch, onOpenExcelExport })
               padding: 0, flexShrink: 0
             }}
           >
-            <div style={{
-              width: 36, height: 36, borderRadius: 10,
-              background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 0 14px rgba(245,158,11,0.4)', padding: 5
-            }}>
-              <img src="/logo.svg" alt="WrapTime" style={{ width: '100%', height: '100%' }} />
+            {/* Logo with spinning arc ring */}
+            <div style={{ position: 'relative', width: 36, height: 36, flexShrink: 0 }}>
+              {/* Spinning arc SVG — sits slightly outside the box */}
+              <svg
+                style={{ position: 'absolute', inset: '-7px', width: 50, height: 50, pointerEvents: 'none' }}
+                viewBox="0 0 50 50"
+              >
+                <circle cx="25" cy="25" r="22"
+                  fill="none"
+                  stroke="rgba(245,158,11,0.15)"
+                  strokeWidth="1.2"
+                />
+                <circle cx="25" cy="25" r="22"
+                  fill="none"
+                  stroke="rgba(245,158,11,0.8)"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeDasharray="18 120"
+                  style={{ animation: 'nav-ring-spin 3s linear infinite', transformOrigin: '25px 25px' }}
+                />
+              </svg>
+              {/* Logo box */}
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 5,
+                animation: 'nav-logo-pulse 3s ease-in-out infinite',
+              }}>
+                <img src="/logo.svg" alt="WrapTime" style={{ width: '100%', height: '100%' }} />
+              </div>
             </div>
+
             <div>
               <h1 style={{
                 fontSize: '1.1rem', fontWeight: 800, margin: 0, lineHeight: 1,
@@ -83,25 +119,28 @@ export const Navbar = ({ selectedBranch, setSelectedBranch, onOpenExcelExport })
             </div>
           </button>
 
-          {/* Branch Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flex: '0 1 auto' }}>
-            <Store size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
-            <select
-              className="form-select nav-branch-select"
-              value={selectedBranch}
-              onChange={(e) => setSelectedBranch(e.target.value)}
-              style={{
-                padding: '0.3rem 0.55rem', fontSize: '0.78rem',
-                width: 'auto', minWidth: '130px', maxWidth: '180px',
-                background: 'rgba(30,41,59,0.95)'
-              }}
-            >
-              <option value="ALL">🏢 All Branches</option>
-              {BRANCHES.map(b => (
-                <option key={b} value={b}>📍 {b}</option>
-              ))}
-            </select>
-          </div>
+
+          {/* Branch Selector — hidden on profile pages */}
+          {!path.startsWith('/profile') && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flex: '0 1 auto' }}>
+              <Store size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
+              <select
+                className="form-select nav-branch-select"
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+                style={{
+                  padding: '0.3rem 0.55rem', fontSize: '0.78rem',
+                  width: 'auto', minWidth: '130px', maxWidth: '180px',
+                  background: 'rgba(30,41,59,0.95)'
+                }}
+              >
+                <option value="ALL">🏢 All Branches</option>
+                {BRANCHES.map(b => (
+                  <option key={b} value={b}>📍 {b}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Desktop Nav Tabs */}
           {isAuthorized && (
@@ -125,8 +164,12 @@ export const Navbar = ({ selectedBranch, setSelectedBranch, onOpenExcelExport })
                   </button>
                 </>
               )}
-              <button className="btn btn-sm btn-success" onClick={onOpenExcelExport} title="Export Excel">
-                <FileSpreadsheet size={14} /><span>Export</span>
+              <button 
+                className={path === '/reports' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-success'} 
+                onClick={() => navigate('/reports')} 
+                title="Monthly Work Reports"
+              >
+                <FileSpreadsheet size={14} /><span>Reports</span>
               </button>
             </nav>
           )}
@@ -230,13 +273,12 @@ export const Navbar = ({ selectedBranch, setSelectedBranch, onOpenExcelExport })
               </button>
             </>
           )}
-          {/* Export — sits in the middle */}
+          {/* Reports */}
           <button
-            className="mobile-nav-btn"
-            style={{ color: 'var(--success)' }}
-            onClick={onOpenExcelExport}
+            className={`mobile-nav-btn ${path === '/reports' ? 'active' : ''}`}
+            onClick={() => navigate('/reports')}
           >
-            <FileSpreadsheet size={22} /><span>Export</span>
+            <FileSpreadsheet size={22} /><span>Reports</span>
           </button>
 
           {/* Profile — rightmost, conventional position */}

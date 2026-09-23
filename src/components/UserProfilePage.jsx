@@ -24,6 +24,7 @@ import {
   Sparkles,
   Plus,
   Trash2,
+  LogOut
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
@@ -63,7 +64,7 @@ const PROFILE_CSS = `
   box-shadow: 0 8px 32px rgba(0,0,0,0.25);
 }
 .prof-hero-banner {
-  height: 96px;
+  height: 100px;
   background: linear-gradient(135deg, hsl(38,95%,22%) 0%, hsl(270,60%,18%) 50%, hsl(210,80%,14%) 100%);
   position: relative;
 }
@@ -194,13 +195,13 @@ const PROFILE_CSS = `
 /* Edit inputs in edit mode */
 .prof-edit-input {
   font-size: 0.85rem !important;
-  padding: 5px 10px !important;
+  padding: 6px 10px !important;
   border-radius: 8px !important;
   width: 100%;
 }
 .prof-edit-select {
   font-size: 0.85rem !important;
-  padding: 5px 8px !important;
+  padding: 6px 8px !important;
   border-radius: 8px !important;
 }
 
@@ -213,6 +214,66 @@ const PROFILE_CSS = `
 }
 .prof-field-row.edit-mode .prof-field-label {
   margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .prof-hero-banner {
+    height: 85px !important;
+  }
+  .prof-hero-body {
+    padding: 0 1rem 1.25rem !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    text-align: center !important;
+    gap: 0.6rem !important;
+  }
+  .prof-avatar-wrap {
+    margin-top: -46px !important;
+    align-self: center !important;
+  }
+  .prof-name-block {
+    min-width: 100% !important;
+    width: 100% !important;
+    padding-top: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+  }
+  .prof-name-block h2 {
+    font-size: 1.35rem !important;
+    text-align: center !important;
+  }
+  .prof-name-email {
+    justify-content: center !important;
+  }
+  .prof-badges-wrap {
+    justify-content: center !important;
+  }
+  .prof-stats-box {
+    width: 100% !important;
+    min-width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-around !important;
+    padding: 0.75rem 1rem !important;
+    margin-top: 0.5rem !important;
+    box-sizing: border-box !important;
+    text-align: center !important;
+  }
+  .prof-quote-card {
+    padding: 0.9rem 1rem !important;
+  }
+  .prof-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+  .prof-panel {
+    padding: 1rem !important;
+  }
+  .prof-field-row {
+    padding: 0.5rem 0 !important;
+  }
 }
 `;
 
@@ -235,7 +296,7 @@ const StyleTag = () => {
 ───────────────────────────────────────────────────────────── */
 export const UserProfilePage = () => {
   const { userId: paramUserId } = useParams();
-  const { userProfile: currentUserProfile, user: currentUser } = useAuth();
+  const { userProfile: currentUserProfile, user: currentUser, logout } = useAuth();
   const navigate = useNavigate();
   const { showAlert } = useToast();
 
@@ -385,37 +446,38 @@ export const UserProfilePage = () => {
       <div className="animate-fade-in" style={{ maxWidth: 860, margin: '0 auto', paddingBottom: '3rem' }}>
 
         {/* ── Top bar ── */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
           <button className="btn btn-sm btn-secondary" onClick={() => navigate(-1)}>
             <ArrowLeft size={15} /> Back
           </button>
-          <div style={{ flex: 1 }} />
-
-          {isOwnProfile && !editMode && (
-            <button
-              className="btn btn-sm btn-primary"
-              style={{ gap: '0.4rem' }}
-              onClick={() => setEditMode(true)}
-            >
-              <Edit3 size={14} /> Edit Profile
-            </button>
-          )}
-          {isOwnProfile && editMode && (
-            <>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {isOwnProfile && !editMode && (
               <button
-                className="btn btn-sm btn-success"
+                className="btn btn-sm btn-primary"
                 style={{ gap: '0.4rem' }}
-                onClick={handleSaveAll}
-                disabled={saving}
+                onClick={() => setEditMode(true)}
               >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                Save All
+                <Edit3 size={14} /> Edit Profile
               </button>
-              <button className="btn btn-sm btn-secondary" onClick={handleCancelEdit} disabled={saving}>
-                <X size={14} /> Cancel
-              </button>
-            </>
-          )}
+            )}
+            {isOwnProfile && editMode && (
+              <>
+                <button
+                  className="btn btn-sm btn-success"
+                  style={{ gap: '0.4rem' }}
+                  onClick={handleSaveAll}
+                  disabled={saving}
+                >
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  Save All
+                </button>
+                <button className="btn btn-sm btn-secondary" onClick={handleCancelEdit} disabled={saving}>
+                  <X size={14} /> Cancel
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* ── Hero Card ── */}
@@ -433,7 +495,7 @@ export const UserProfilePage = () => {
             </div>
 
             <div className="prof-name-block">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+              <div className="prof-name-email" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.55rem', fontWeight: 900, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.02em' }}>
                   {profileUser.displayName || 'Unnamed User'}
                 </h2>
@@ -442,11 +504,11 @@ export const UserProfilePage = () => {
                 )}
               </div>
 
-              <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.3rem' }}>
+              <div className="prof-name-email" style={{ fontSize: '0.84rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.3rem' }}>
                 <Mail size={13} color="var(--primary)" /> {profileUser.email}
               </div>
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.7rem' }}>
+              <div className="prof-badges-wrap" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.7rem' }}>
                 {isManager ? (
                   <span className="badge badge-amber" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem' }}>
                     <ShieldCheck size={13} /> Manager
@@ -724,6 +786,31 @@ export const UserProfilePage = () => {
 
           </div>
         </div>
+
+        {/* ── Sign Out Section (Own Profile) ── */}
+        {isOwnProfile && (
+          <div style={{ marginTop: '1.75rem' }}>
+            <button
+              className="btn btn-danger"
+              onClick={logout}
+              style={{
+                width: '100%',
+                padding: '0.85rem 1rem',
+                fontSize: '0.95rem',
+                fontWeight: 700,
+                borderRadius: 14,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                boxShadow: '0 4px 18px rgba(239,68,68,0.25)',
+                cursor: 'pointer'
+              }}
+            >
+              <LogOut size={18} /> Sign Out of WrapTime
+            </button>
+          </div>
+        )}
 
       </div>
     </>

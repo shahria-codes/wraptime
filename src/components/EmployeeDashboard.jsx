@@ -216,28 +216,40 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                             title={`Click to view ${s.userDisplayName}'s staff profile`}
                             style={{ 
                               background: 'rgba(15, 23, 42, 0.75)',
-                              padding: '0.5rem',
+                              padding: '0.4rem 0.5rem',
                               borderRadius: '6px',
                               border: '1px solid var(--border-color)',
                               borderLeft: s.userId === myUid ? '3px solid var(--success)' : '3px solid var(--primary)',
-                              cursor: 'pointer'
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '0.4rem'
                             }}
                           >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0, flex: 1 }}>
                               <UserAvatar
                                 photoURL={employeeMap[s.userId]?.photoURL || s.photoURL}
                                 displayName={s.userDisplayName}
-                                size={20}
+                                size={22}
                               />
-                              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: s.userId === myUid ? 'var(--success)' : '#FFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {s.userDisplayName} {s.userId === myUid && '(You)'}
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: '0.8rem', color: s.userId === myUid ? 'var(--success)' : '#FFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.1 }}>
+                                  {s.userDisplayName} {s.userId === myUid && '(You)'}
+                                </div>
                               </div>
                             </div>
-                            <div style={{ fontSize: '0.7rem', color: 'var(--accent-gold)' }}>
-                              {s.startTime} - {s.endTime}
-                            </div>
-                            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                              📍 {s.branch}
+                            <div style={{
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              color: 'var(--accent-gold)',
+                              background: 'rgba(255,255,255,0.06)',
+                              padding: '2px 5px',
+                              borderRadius: '4px',
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0
+                            }}>
+                              {s.startTime || '09:00'}-{s.endTime || '22:00'}
                             </div>
                           </div>
                         ))

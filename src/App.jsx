@@ -12,13 +12,12 @@ import { UserProfilePage } from './components/UserProfilePage';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import { Loader2 } from 'lucide-react';
 
-const ProtectedLayout = ({ children, selectedBranch, setSelectedBranch, onOpenExcelExport }) => {
+const ProtectedLayout = ({ children, selectedBranch, setSelectedBranch }) => {
   return (
     <div style={{ minHeight: '100vh', paddingBottom: '1rem' }}>
       <Navbar
         selectedBranch={selectedBranch}
         setSelectedBranch={setSelectedBranch}
-        onOpenExcelExport={onOpenExcelExport}
       />
       <main className="app-container" style={{ paddingTop: '1rem' }}>
         {children}
@@ -30,7 +29,6 @@ const ProtectedLayout = ({ children, selectedBranch, setSelectedBranch, onOpenEx
 const AppRoutes = () => {
   const { user, userProfile, loading } = useAuth();
   const [selectedBranch, setSelectedBranch] = useState('ALL');
-  const [isExcelOpen, setIsExcelOpen] = useState(false);
 
   if (loading) {
     return (
@@ -147,13 +145,13 @@ const AppRoutes = () => {
       <ProtectedLayout 
         selectedBranch={selectedBranch}
         setSelectedBranch={setSelectedBranch}
-        onOpenExcelExport={() => setIsExcelOpen(true)}
       >
         <Routes>
           {isManager ? (
             <>
               {/* Manager Routes */}
               <Route path="/schedule" element={<ManagerDashboard selectedBranch={selectedBranch} />} />
+              <Route path="/reports" element={<ExcelExporter selectedBranch={selectedBranch} />} />
               <Route path="/employees" element={<EmployeeManager />} />
               <Route path="/approvals" element={<EmployeeManager />} />
               <Route path="/profile" element={<UserProfilePage />} />
@@ -166,6 +164,7 @@ const AppRoutes = () => {
               {/* Employee Routes */}
               <Route path="/my-shifts" element={<EmployeeDashboard selectedBranch={selectedBranch} activeSubTab="my-schedule" />} />
               <Route path="/roster" element={<EmployeeDashboard selectedBranch={selectedBranch} activeSubTab="roster" />} />
+              <Route path="/reports" element={<ExcelExporter selectedBranch={selectedBranch} />} />
               <Route path="/profile" element={<UserProfilePage />} />
               <Route path="/profile/:userId" element={<UserProfilePage />} />
               <Route path="/" element={<Navigate to="/my-shifts" replace />} />
@@ -174,11 +173,6 @@ const AppRoutes = () => {
           )}
         </Routes>
       </ProtectedLayout>
-
-      <ExcelExporter 
-        isOpen={isExcelOpen}
-        onClose={() => setIsExcelOpen(false)}
-      />
 
       <PwaInstallPrompt />
     </>

@@ -53,7 +53,12 @@ export const ManagerDashboard = ({ selectedBranch }) => {
 
   // Quick Multi-Date Scheduler State
   const [formUserId, setFormUserId] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
   const [formBranch, setFormBranch] = useState(selectedBranch !== 'ALL' ? selectedBranch : 'Panorama');
+  const [locationMode, setLocationMode] = useState('same'); // 'same', 'per_date', or 'per_employee'
+  const [userBranches, setUserBranches] = useState({}); // { [uid]: branch }
+  const [dateBranches, setDateBranches] = useState({}); // { [dateStr]: branch }
+  const [activeDatePrompt, setActiveDatePrompt] = useState(null);
   const [formStartTime, setFormStartTime] = useState('09:00');
   const [formEndTime, setFormEndTime] = useState('22:00');
   const [formBreakMinutes, setFormBreakMinutes] = useState('60');
@@ -141,10 +146,55 @@ export const ManagerDashboard = ({ selectedBranch }) => {
   const paddingOffset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
   const paddingDays = Array.from({ length: paddingOffset }, (_, i) => i);
 
+  const toggleUserSelection = (uId) => {
+    if (editingShift) {
+      setFormUserId(uId);
+      setSelectedUserIds([uId]);
+    } else {
+      if (selectedUserIds.includes(uId)) {
+        if (selectedUserIds.length > 1) {
+          setSelectedUserIds(selectedUserIds.filter(id => id !== uId));
+        }
+      } else {
+        setSelectedUserIds([...selectedUserIds, uId]);
+      }
+    }
+  };
+
+  const selectAllEmployees = () => {
+    if (editingShift) return;
+    const allIds = schedulableEmployees.map(e => e.uid || e.id);
+    setSelectedUserIds(allIds);
+  };
+
+  const clearEmployeeSelection = () => {
+    if (editingShift) return;
+    const firstUid = schedulableEmployees[0]?.uid || schedulableEmployees[0]?.id;
+    setSelectedUserIds(firstUid ? [firstUid] : []);
+  };
+
   const handleOpenAddModal = (targetDateStr = null, defaultBranch = 'Panorama') => {
     setEditingShift(null);
-    setFormUserId(schedulableEmployees[0]?.uid || schedulableEmployees[0]?.id || '');
-    setFormBranch(selectedBranch !== 'ALL' ? selectedBranch : defaultBranch);
+    const firstUid = schedulableEmployees[0]?.uid || schedulableEmployees[0]?.id || '';
+    setFormUserId(firstUid);
+    setSelectedUserIds(firstUid ? [firstUid] : []);
+    const initialBranch = selectedBranch !== 'ALL' ? selectedBranch : defaultBranch;
+    setFormBranch(initialBranch);
+    setLocationMode('same');
+
+    const initialEmpMap = {};
+    schedulableEmployees.forEach(e => {
+      const uid = e.uid || e.id;
+      initialEmpMap[uid] = e.assignedBranch || initialBranch;
+    });
+    setUserBranches(initialEmpMap);
+
+    const initialDateMap = {};
+    if (targetDateStr) {
+      initialDateMap[targetDateStr] = initialBranch;
+    }
+    setDateBranches(initialDateMap);
+
     setFormStartTime('09:00');
     setFormEndTime('22:00');
     setFormBreakMinutes('60');
@@ -171,7 +221,11 @@ export const ManagerDashboard = ({ selectedBranch }) => {
   const handleOpenEditModal = (shift) => {
     setEditingShift(shift);
     setFormUserId(shift.userId);
+    setSelectedUserIds([shift.userId]);
     setFormBranch(shift.branch);
+    setLocationMode('same');
+    setUserBranches({ [shift.userId]: shift.branch });
+    setDateBranches({ [shift.date]: shift.branch });
     setFormStartTime(shift.startTime || '09:00');
     setFormEndTime(shift.endTime || '22:00');
     setFormBreakMinutes(String(shift.breakMinutes ?? 60));
@@ -182,63 +236,46 @@ export const ManagerDashboard = ({ selectedBranch }) => {
     setIsModalOpen(true);
   };
 
-  // Helper: Check if selected employee already has a shift on date at another branch
-  const getEmployeeLocationConflict = (userId, dateStr, currentTargetBranch) => {
-    if (!userId || !dateStr) return null;
-    const existingShift = shifts.find(s => {
-      if (editingShift && s.id === editingShift.id) return false;
-      return s.userId === userId && s.date === dateStr && s.branch !== currentTargetBranch;
-    });
-    return existingShift ? existingShift.branch : null;
-  };
-
   const toggleDateSelection = (dateStr) => {
-    if (editingShift) return; // Edit mode operates on single date
-
+    if (editingShift) return; // Date is locked for specific shift editing
     if (isBefore(startOfDay(parseISO(dateStr)), startOfDay(new Date()))) {
       showAlert("Past dates cannot be scheduled. Please select today or a future date.", "Past Date Restricted", "warning");
       return;
     }
 
-    const conflictBranch = getEmployeeLocationConflict(formUserId, dateStr, formBranch);
-    if (conflictBranch) {
-      const emp = employees.find(e => (e.uid || e.id) === formUserId);
-      const empName = emp ? emp.displayName : 'This employee';
-      showAlert(`${empName} is already scheduled at "${conflictBranch}" on ${dateStr}.\nAn employee cannot be scheduled in different locations on the same day.`, "Location Conflict", "warning");
-      return;
-    }
-
     if (selectedDates.includes(dateStr)) {
       setSelectedDates(selectedDates.filter(d => d !== dateStr));
+      if (activeDatePrompt === dateStr) {
+        setActiveDatePrompt(null);
+      }
     } else {
       setSelectedDates([...selectedDates, dateStr]);
+      if (!dateBranches[dateStr]) {
+        setDateBranches(prev => ({ ...prev, [dateStr]: formBranch }));
+      }
+      setActiveDatePrompt(dateStr);
     }
   };
 
   const selectAllMonthDays = () => {
-    if (editingShift || !formUserId) return;
+    if (editingShift || selectedUserIds.length === 0) return;
     const validDates = [];
-    const conflicts = [];
     const today = startOfDay(new Date());
+    const newDateBranches = { ...dateBranches };
 
     monthDays.forEach(d => {
       // Skip past dates
       if (isBefore(startOfDay(d), today)) return;
-
       const dStr = format(d, 'yyyy-MM-dd');
-      const conflictBranch = getEmployeeLocationConflict(formUserId, dStr, formBranch);
-      if (conflictBranch) {
-        conflicts.push(`${dStr} (${conflictBranch})`);
-      } else {
-        validDates.push(dStr);
+      validDates.push(dStr);
+      if (!newDateBranches[dStr]) {
+        newDateBranches[dStr] = formBranch;
       }
     });
 
     if (validDates.length > 0) {
       setSelectedDates(validDates);
-    }
-    if (conflicts.length > 0) {
-      showAlert(`Skipped ${conflicts.length} conflicting date(s) where employee is already scheduled at another location:\n\n` + conflicts.slice(0, 5).join('\n') + (conflicts.length > 5 ? '\n...' : ''), "Conflicts Skipped", "info");
+      setDateBranches(newDateBranches);
     }
   };
 
@@ -250,8 +287,8 @@ export const ManagerDashboard = ({ selectedBranch }) => {
 
   const handleSaveShift = async (e) => {
     e.preventDefault();
-    if (!formUserId) {
-      showAlert("Please select an employee.", "Selection Required", "warning");
+    if (selectedUserIds.length === 0) {
+      showAlert("Please select at least one employee.", "Selection Required", "warning");
       return;
     }
     if (selectedDates.length === 0) {
@@ -259,58 +296,87 @@ export const ManagerDashboard = ({ selectedBranch }) => {
       return;
     }
 
-    // Double check conflict & past date validation for all selected dates
+    // Past date validation
     const today = startOfDay(new Date());
     for (const dStr of selectedDates) {
       if (isBefore(startOfDay(parseISO(dStr)), today)) {
         showAlert(`Cannot save schedule for ${dStr}:\nPast dates cannot be scheduled.`, "Past Date Restricted", "error");
         return;
       }
-      const conflictBranch = getEmployeeLocationConflict(formUserId, dStr, formBranch);
-      if (conflictBranch) {
-        const emp = employees.find(e => (e.uid || e.id) === formUserId);
-        showAlert(`${emp?.displayName || 'Employee'} is already scheduled at "${conflictBranch}" on ${dStr}.\nAn employee cannot be scheduled in different locations on the same day.`, "Location Conflict Warning", "error");
-        return;
-      }
     }
 
-    const selectedEmp = employees.find(emp => (emp.uid || emp.id) === formUserId);
-    const empName = selectedEmp ? selectedEmp.displayName : 'Employee';
-
-    const calculatedHours = calculateShiftHours(formStartTime, formEndTime, Number(formBreakMinutes));
+    const autoBreak = getAutoBreakMinutes(formStartTime, formEndTime);
+    const calculatedHours = calculateShiftHours(formStartTime, formEndTime, autoBreak);
     const finalActualHours = formActualHours !== '' ? parseFloat(formActualHours) : parseFloat(calculatedHours);
 
     if (editingShift) {
       // Single shift update
+      const targetUid = selectedUserIds[0] || formUserId;
+      const selectedEmp = employees.find(emp => (emp.uid || emp.id) === targetUid);
+      const empName = selectedEmp ? selectedEmp.displayName : 'Employee';
+
+      let empBranch = formBranch;
+      if (locationMode === 'per_date' && dateBranches[selectedDates[0]]) {
+        empBranch = dateBranches[selectedDates[0]];
+      } else if (locationMode === 'per_employee' && userBranches[targetUid]) {
+        empBranch = userBranches[targetUid];
+      }
+
       const shiftData = {
-        userId: formUserId,
+        userId: targetUid,
         userDisplayName: empName,
-        branch: formBranch,
+        branch: empBranch,
         date: selectedDates[0],
         startTime: formStartTime,
         endTime: formEndTime,
-        breakMinutes: Number(formBreakMinutes),
+        breakMinutes: autoBreak,
         actualHours: finalActualHours,
         note: formNote,
         updatedAt: new Date().toISOString()
       };
       await updateDoc(doc(db, 'shifts', editingShift.id), shiftData);
     } else {
-      // Create shifts across all selected calendar dates
-      for (const dStr of selectedDates) {
-        const newDocRef = doc(collection(db, 'shifts'));
-        await setDoc(newDocRef, {
-          userId: formUserId,
-          userDisplayName: empName,
-          branch: formBranch,
-          date: dStr,
-          startTime: formStartTime,
-          endTime: formEndTime,
-          breakMinutes: Number(formBreakMinutes),
-          actualHours: finalActualHours,
-          note: formNote,
-          createdAt: new Date().toISOString()
-        });
+      // Create/replace shifts for ALL selected employees across ALL selected dates
+      for (const uId of selectedUserIds) {
+        const selectedEmp = employees.find(emp => (emp.uid || emp.id) === uId);
+        const empName = selectedEmp ? selectedEmp.displayName : 'Employee';
+
+        for (const dStr of selectedDates) {
+          let empBranch = formBranch;
+          if (locationMode === 'per_date' && dateBranches[dStr]) {
+            empBranch = dateBranches[dStr];
+          } else if (locationMode === 'per_employee' && userBranches[uId]) {
+            empBranch = userBranches[uId];
+          }
+
+          const existingShift = shifts.find(s => s.userId === uId && s.date === dStr);
+          if (existingShift) {
+            await updateDoc(doc(db, 'shifts', existingShift.id), {
+              userDisplayName: empName,
+              branch: empBranch,
+              startTime: formStartTime,
+              endTime: formEndTime,
+              breakMinutes: autoBreak,
+              actualHours: finalActualHours,
+              note: formNote,
+              updatedAt: new Date().toISOString()
+            });
+          } else {
+            const newDocRef = doc(collection(db, 'shifts'));
+            await setDoc(newDocRef, {
+              userId: uId,
+              userDisplayName: empName,
+              branch: empBranch,
+              date: dStr,
+              startTime: formStartTime,
+              endTime: formEndTime,
+              breakMinutes: autoBreak,
+              actualHours: finalActualHours,
+              note: formNote,
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
       }
     }
 
@@ -323,13 +389,25 @@ export const ManagerDashboard = ({ selectedBranch }) => {
     await deleteDoc(doc(db, 'shifts', shiftId));
   };
 
-  const calculateShiftHours = (start, end, breakMins = 0) => {
+  const getAutoBreakMinutes = (start, end) => {
+    if (!start || !end) return 30;
+    const [sH, sM] = start.split(':').map(Number);
+    const [eH, eM] = end.split(':').map(Number);
+    let grossMinutes = (eH * 60 + eM) - (sH * 60 + sM);
+    if (grossMinutes < 0) grossMinutes += 24 * 60;
+    return (grossMinutes / 60) >= 8 ? 60 : 30;
+  };
+
+  const calculateShiftHours = (start, end, breakMins = null) => {
     if (!start || !end) return 0;
+    const b = (breakMins !== null && breakMins !== undefined && breakMins !== '')
+      ? Number(breakMins)
+      : getAutoBreakMinutes(start, end);
     const [sH, sM] = start.split(':').map(Number);
     const [eH, eM] = end.split(':').map(Number);
     let totalMinutes = (eH * 60 + eM) - (sH * 60 + sM);
     if (totalMinutes < 0) totalMinutes += 24 * 60;
-    totalMinutes -= breakMins;
+    totalMinutes -= b;
     return Math.max(0, (totalMinutes / 60)).toFixed(1);
   };
 
@@ -425,7 +503,7 @@ export const ManagerDashboard = ({ selectedBranch }) => {
               </div>
 
               {/* Day Shifts */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                 {dayShifts.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-subtle)', fontSize: '0.75rem', border: '1px dashed var(--border-color)', borderRadius: '8px' }}>
                     No shifts scheduled
@@ -439,61 +517,92 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                     return (
                       <div
                         key={shift.id}
-                        className="shift-card"
+                        style={{
+                          background: 'rgba(15, 23, 42, 0.75)',
+                          border: '1px solid var(--border-color)',
+                          borderLeft: '3px solid var(--primary)',
+                          borderRadius: '8px',
+                          padding: '0.45rem 0.6rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.3rem',
+                          marginBottom: '0.35rem',
+                          boxSizing: 'border-box',
+                          width: '100%',
+                          transition: 'all 0.15s ease'
+                        }}
                       >
-                        {/* Row 1: Avatar + Name & Branch */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <UserAvatar
-                            photoURL={employeeMap[shift.userId]?.photoURL || shift.photoURL}
-                            displayName={shift.userDisplayName}
-                            size={28}
-                          />
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#FFFFFF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.2 }}>
+                        {/* Top Line: Avatar + Employee Name + Action Buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.35rem', width: '100%' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0, flex: 1 }}>
+                            <UserAvatar
+                              photoURL={employeeMap[shift.userId]?.photoURL || shift.photoURL}
+                              displayName={shift.userDisplayName}
+                              size={22}
+                            />
+                            <span style={{
+                              fontWeight: 700,
+                              fontSize: '0.82rem',
+                              color: '#FFFFFF',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              lineHeight: 1.2
+                            }}>
                               {shift.userDisplayName}
-                            </div>
-                            <div style={{ fontSize: '0.68rem', color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.2rem', marginTop: '1px' }}>
-                              📍 {shift.branch}
-                            </div>
+                            </span>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+                            <button 
+                              type="button"
+                              className="btn btn-sm btn-secondary" 
+                              style={{ padding: '2px 5px', minHeight: '22px', fontSize: '0.65rem' }}
+                              onClick={() => handleOpenEditModal(shift)}
+                              title="Edit shift"
+                            >
+                              <Edit3 size={11} />
+                            </button>
+                            <button 
+                              type="button"
+                              className="btn btn-sm btn-danger" 
+                              style={{ padding: '2px 5px', minHeight: '22px', fontSize: '0.65rem' }}
+                              onClick={() => handleDeleteShift(shift.id)}
+                              title="Delete shift"
+                            >
+                              <Trash2 size={11} />
+                            </button>
                           </div>
                         </div>
 
-                        {/* Row 2: Shift Time & Duration */}
-                        <div style={{ fontSize: '0.76rem', color: 'var(--accent-gold)', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 600, background: 'rgba(255,255,255,0.05)', padding: '4px 7px', borderRadius: '6px', flexWrap: 'wrap' }}>
-                          <Clock size={12} style={{ flexShrink: 0 }} /> 
-                          <span style={{ whiteSpace: 'nowrap' }}>{shift.startTime || '09:00'} - {shift.endTime || '22:00'}</span>
-                          <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '0.74rem' }}>({hrs}h)</span>
-                        </div>
-
-                        {/* Optional Note / Sick Info */}
-                        {shift.note && (
-                          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '2px 4px' }}>
-                            📝 {shift.note}
+                        {/* Bottom Line: Shift Time & Hours, Branch Pill & Note */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.35rem', width: '100%', flexWrap: 'wrap' }}>
+                          <div style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: 'var(--accent-gold)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            <Clock size={11} style={{ flexShrink: 0 }} />
+                            <span>{shift.startTime || '09:00'}-{shift.endTime || '22:00'}</span>
+                            <span style={{ color: 'var(--success)', fontWeight: 800 }}>({hrs}h)</span>
                           </div>
-                        )}
 
-                        {/* Row 3: Action Buttons */}
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.35rem', paddingTop: '0.25rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                          <button 
-                            type="button"
-                            className="btn btn-sm btn-secondary" 
-                            style={{ padding: '3px 7px', fontSize: '0.7rem' }}
-                            onClick={() => handleOpenEditModal(shift)}
-                            title="Edit shift"
-                          >
-                            <Edit3 size={12} />
-                          </button>
-                          <button 
-                            type="button"
-                            className="btn btn-sm btn-danger" 
-                            style={{ padding: '3px 7px', fontSize: '0.7rem' }}
-                            onClick={() => handleDeleteShift(shift.id)}
-                            title="Delete shift"
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+                            {selectedBranch === 'ALL' && (
+                              <span style={{ fontSize: '0.63rem', color: 'var(--primary)', fontWeight: 600, background: 'rgba(245,158,11,0.1)', padding: '1px 5px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                                📍 {shift.branch}
+                              </span>
+                            )}
+                            {shift.note && (
+                              <span title={shift.note} style={{ cursor: 'help', fontSize: '0.72rem' }}>📝</span>
+                            )}
+                          </div>
                         </div>
-
                       </div>
                     );
                   })
@@ -520,176 +629,163 @@ export const ManagerDashboard = ({ selectedBranch }) => {
 
             <form onSubmit={handleSaveShift}>
               
-              {/* 1. Employee Name */}
-              <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--primary)' }}>
-                  <User size={16} /> Employee Name
-                </label>
-
-                {/* Selected Employee Preview with Avatar */}
-                {formUserId && employeeMap[formUserId] && (
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    padding: '0.65rem 0.85rem',
-                    background: 'rgba(255,255,255,0.05)',
-                    borderRadius: '10px',
-                    border: '1px solid var(--border-color)',
-                    marginBottom: '0.65rem'
-                  }}>
-                    <UserAvatar
-                      photoURL={employeeMap[formUserId].photoURL}
-                      displayName={employeeMap[formUserId].displayName}
-                      size={38}
-                    />
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-main)' }}>
-                        {employeeMap[formUserId].displayName}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {employeeMap[formUserId].email || 'Staff Employee'} • {employeeMap[formUserId].assignedBranch || 'Suppa Kebs'}
-                      </div>
+              {/* 1. Employee Selection */}
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--primary)', margin: 0 }}>
+                    <User size={16} /> {editingShift ? 'Employee Name' : `Select Employee(s) (${selectedUserIds.length} selected)`}
+                  </label>
+                  {!editingShift && (
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <button type="button" className="btn btn-sm btn-secondary" style={{ fontSize: '0.7rem', padding: '2px 6px' }} onClick={selectAllEmployees}>
+                        Select All Staff
+                      </button>
+                      <button type="button" className="btn btn-sm btn-secondary" style={{ fontSize: '0.7rem', padding: '2px 6px' }} onClick={clearEmployeeSelection}>
+                        Reset
+                      </button>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
-                <select 
-                  className="form-select" 
-                  value={formUserId} 
-                  onChange={(e) => setFormUserId(e.target.value)}
-                  required
-                  style={{ fontSize: '1rem', padding: '0.75rem 1rem' }}
-                >
-                  {schedulableEmployees.length === 0 ? (
-                    <option value="">No authorized employees found</option>
-                  ) : (
-                    schedulableEmployees.map(emp => (
+                {editingShift ? (
+                  <select 
+                    className="form-select" 
+                    value={formUserId} 
+                    onChange={(e) => {
+                      setFormUserId(e.target.value);
+                      setSelectedUserIds([e.target.value]);
+                    }}
+                    required
+                    style={{ fontSize: '1rem', padding: '0.75rem 1rem' }}
+                  >
+                    {schedulableEmployees.map(emp => (
                       <option key={emp.uid || emp.id} value={emp.uid || emp.id}>
                         {emp.displayName} ({emp.assignedBranch || 'Employee'})
                       </option>
-                    ))
-                  )}
-                </select>
+                    ))}
+                  </select>
+                ) : (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(145px, 1fr))',
+                    gap: '0.45rem',
+                    maxHeight: '160px',
+                    overflowY: 'auto',
+                    padding: '6px',
+                    background: 'rgba(15, 23, 42, 0.4)',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border-color)'
+                  }}>
+                    {schedulableEmployees.map(emp => {
+                      const uid = emp.uid || emp.id;
+                      const isSelected = selectedUserIds.includes(uid);
+
+                      return (
+                        <div
+                          key={uid}
+                          onClick={() => toggleUserSelection(uid)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            padding: '0.45rem 0.6rem',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            background: isSelected ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.03)',
+                            border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <UserAvatar photoURL={emp.photoURL} displayName={emp.displayName} size={22} />
+                          <span style={{
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            color: isSelected ? 'var(--primary)' : 'var(--text-main)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            flex: 1
+                          }}>
+                            {emp.displayName}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            style={{ pointerEvents: 'none', width: '14px', height: '14px', accentColor: 'var(--primary)' }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
-              {/* 2. Location (Branch) */}
-              <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--primary)' }}>
-                  <Store size={16} /> Location (Branch)
-                </label>
-                <select 
-                  className="form-select"
-                  value={formBranch}
-                  onChange={(e) => setFormBranch(e.target.value)}
-                  required
-                  style={{ fontSize: '1rem', padding: '0.75rem 1rem' }}
-                >
-                  {BRANCHES.map(b => (
-                    <option key={b} value={b}>📍 {b}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 3. Shift Times & Worked Hours (ONLY shown when editing an existing shift) */}
-              {editingShift && (
-                <div className="form-group" style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '1rem' }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--accent-gold)', marginBottom: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <Clock size={16} /> Shift Timing & Worked Hours Adjustment
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.65rem' }}>
-                    <div>
-                      <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)' }}>Start Time</label>
+              {/* 2. Workplace Location Assignment Mode */}
+              {!editingShift && (
+                <div className="form-group" style={{ marginBottom: '1.25rem', background: 'rgba(15, 23, 42, 0.5)', padding: '0.8rem 1rem', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-gold)', marginBottom: '0.6rem' }}>
+                    <Store size={15} /> Workplace Location Assignment:
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.85rem', flexWrap: 'wrap' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: locationMode === 'same' ? 700 : 500, color: locationMode === 'same' ? 'var(--primary)' : 'var(--text-main)', cursor: 'pointer' }}>
                       <input 
-                        type="time" 
-                        className="form-control" 
-                        value={formStartTime} 
-                        onChange={(e) => {
-                          const newStart = e.target.value;
-                          setFormStartTime(newStart);
-                          const [sH, sM] = newStart.split(':').map(Number);
-                          const [eH, eM] = formEndTime.split(':').map(Number);
-                          let grossMinutes = (eH * 60 + eM) - (sH * 60 + sM);
-                          if (grossMinutes < 0) grossMinutes += 24 * 60;
-                          setFormBreakMinutes(String((grossMinutes / 60) >= 8 ? 60 : 30));
-                        }}
-                        style={{ padding: '0.45rem 0.65rem', fontSize: '0.85rem' }}
+                        type="radio" 
+                        name="locationModeRadio" 
+                        checked={locationMode === 'same'} 
+                        onChange={() => setLocationMode('same')}
+                        style={{ accentColor: 'var(--primary)', width: '15px', height: '15px' }}
                       />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)' }}>End Time</label>
+                      <span>Same Place for All Dates</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: locationMode === 'per_date' ? 700 : 500, color: locationMode === 'per_date' ? 'var(--primary)' : 'var(--text-main)', cursor: 'pointer' }}>
                       <input 
-                        type="time" 
-                        className="form-control" 
-                        value={formEndTime} 
-                        onChange={(e) => {
-                          const newEnd = e.target.value;
-                          setFormEndTime(newEnd);
-                          const [sH, sM] = formStartTime.split(':').map(Number);
-                          const [eH, eM] = newEnd.split(':').map(Number);
-                          let grossMinutes = (eH * 60 + eM) - (sH * 60 + sM);
-                          if (grossMinutes < 0) grossMinutes += 24 * 60;
-                          setFormBreakMinutes(String((grossMinutes / 60) >= 8 ? 60 : 30));
-                        }}
-                        style={{ padding: '0.45rem 0.65rem', fontSize: '0.85rem' }}
+                        type="radio" 
+                        name="locationModeRadio" 
+                        checked={locationMode === 'per_date'} 
+                        onChange={() => setLocationMode('per_date')}
+                        style={{ accentColor: 'var(--primary)', width: '15px', height: '15px' }}
                       />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.65rem' }}>
-                    <div>
-                      <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                        Break (Mins) <span style={{ opacity: 0.7, fontSize: '0.7rem' }}>(&ge;8h=60m, &lt;8h=30m)</span>
-                      </label>
-                      <input 
-                        type="number" 
-                        className="form-control" 
-                        value={formBreakMinutes} 
-                        onChange={(e) => setFormBreakMinutes(e.target.value)}
-                        placeholder="60"
-                        style={{ padding: '0.45rem 0.65rem', fontSize: '0.85rem' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--success)' }}>
-                        Worked Hours (Sick / Early)
-                      </label>
-                      <input 
-                        type="number" 
-                        step="0.5"
-                        min="0"
-                        max="24"
-                        className="form-control" 
-                        value={formActualHours} 
-                        onChange={(e) => setFormActualHours(e.target.value)}
-                        placeholder={`Auto: ${calculateShiftHours(formStartTime, formEndTime, Number(formBreakMinutes))}h`}
-                        style={{ padding: '0.45rem 0.65rem', fontSize: '0.85rem', borderColor: formActualHours ? 'var(--success)' : undefined }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)' }}>Shift Notes / Sick Reason</label>
-                    <input 
-                      type="text" 
-                      className="form-control" 
-                      value={formNote} 
-                      onChange={(e) => setFormNote(e.target.value)}
-                      placeholder="e.g. Left early sick at 14:00"
-                      style={{ padding: '0.45rem 0.65rem', fontSize: '0.85rem' }}
-                    />
+                      <span>Different Place per Date</span>
+                    </label>
                   </div>
                 </div>
               )}
 
-              {/* 3. Full Month Interactive Calendar Date Picker */}
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                
-                {/* Month Navigation & Batch Selectors */}
+              {/* 3. Location / Branch Selection (Shown when locationMode === 'same' or when editing) */}
+              {(locationMode === 'same' || editingShift) && (
+                <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--primary)', marginBottom: '0.4rem' }}>
+                    <Store size={16} /> Location / Branch (Workplace)
+                  </label>
+                  <select 
+                    className="form-select"
+                    value={formBranch}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormBranch(val);
+                      const newD = {};
+                      selectedDates.forEach(d => { newD[d] = val; });
+                      setDateBranches(newD);
+                      const newU = {};
+                      selectedUserIds.forEach(u => { newU[u] = val; });
+                      setUserBranches(newU);
+                    }}
+                    required
+                    style={{ fontSize: '0.95rem', padding: '0.65rem 0.9rem' }}
+                  >
+                    {BRANCHES.map(b => (
+                      <option key={b} value={b}>📍 {b}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* 4. Working Date Selection & Per-Date Workplace Dropdowns */}
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--primary)', margin: 0 }}>
-                    <CalendarIcon size={16} /> Select Working Dates ({selectedDates.length} selected)
+                    <CalendarIcon size={16} /> {editingShift ? 'Scheduled Date (Fixed)' : `Select Working Date(s) (${selectedDates.length} selected)`}
                   </label>
 
                   {!editingShift && (
@@ -704,71 +800,264 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                   )}
                 </div>
 
-                {/* Calendar Month Header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(15, 23, 42, 0.7)', padding: '6px 12px', borderRadius: '8px', marginBottom: '8px', border: '1px solid var(--border-color)' }}>
-                  <button type="button" className="btn btn-sm btn-secondary" style={{ padding: '2px 6px' }} onClick={() => setCalendarMonth(subMonths(calendarMonth, 1))}>
-                    <ChevronLeft size={16} />
-                  </button>
-
-                  <span style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--accent-gold)' }}>
-                    {format(calendarMonth, 'MMMM yyyy')}
-                  </span>
-
-                  <button type="button" className="btn btn-sm btn-secondary" style={{ padding: '2px 6px' }} onClick={() => setCalendarMonth(addMonths(calendarMonth, 1))}>
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-
-                {/* Month Days Grid (7 columns: Mon to Sun) */}
-                <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '8px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                  
-                  {/* Day Names Row */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', fontWeight: 700, fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                    <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                {editingShift ? (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    padding: '0.75rem 1rem',
+                    background: 'rgba(245, 158, 11, 0.12)',
+                    borderRadius: '10px',
+                    border: '1px solid var(--accent-gold)',
+                    color: 'var(--accent-gold)',
+                    fontWeight: 700,
+                    fontSize: '0.95rem'
+                  }}>
+                    <CalendarIcon size={18} />
+                    <span>{selectedDates[0] ? format(parseISO(selectedDates[0]), 'EEEE, MMMM d, yyyy') : ''}</span>
+                    <span style={{ fontSize: '0.72rem', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '6px', marginLeft: 'auto', color: 'var(--text-muted)' }}>
+                      🔒 Locked for Edit
+                    </span>
                   </div>
+                ) : (
+                  <>
+                    {/* Calendar Month Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(15, 23, 42, 0.7)', padding: '6px 12px', borderRadius: '8px', marginBottom: '8px', border: '1px solid var(--border-color)' }}>
+                      <button type="button" className="btn btn-sm btn-secondary" style={{ padding: '2px 6px' }} onClick={() => setCalendarMonth(subMonths(calendarMonth, 1))}>
+                        <ChevronLeft size={16} />
+                      </button>
 
-                  {/* Calendar Grid Cells */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
-                    {/* Padding cells before 1st of month */}
-                    {paddingDays.map(p => (
-                      <div key={`pad-${p}`} style={{ height: '36px' }} />
-                    ))}
+                      <span style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--accent-gold)' }}>
+                        {format(calendarMonth, 'MMMM yyyy')}
+                      </span>
 
-                    {/* Days of the month */}
-                    {monthDays.map(d => {
-                      const dStr = format(d, 'yyyy-MM-dd');
-                      const isSelected = selectedDates.includes(dStr);
-                      const isToday = isSameDay(d, new Date());
-                      const isPast = isBefore(startOfDay(d), startOfDay(new Date()));
-                      const conflictLocation = getEmployeeLocationConflict(formUserId, dStr, formBranch);
+                      <button type="button" className="btn btn-sm btn-secondary" style={{ padding: '2px 6px' }} onClick={() => setCalendarMonth(addMonths(calendarMonth, 1))}>
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
 
-                      return (
-                        <button
-                          key={dStr}
-                          type="button"
-                          disabled={isPast}
-                          onClick={() => !isPast && toggleDateSelection(dStr)}
-                          title={isPast ? "Past date - cannot be scheduled" : conflictLocation ? `Conflict: Already scheduled at ${conflictLocation}` : `${format(d, 'MMM d, yyyy')}`}
-                          className={`cal-day-btn${isSelected ? ' selected' : ''}${isToday && !isSelected ? ' is-today' : ''}${conflictLocation ? ' conflict' : ''}`}
-                          style={isPast ? { opacity: 0.3, cursor: 'not-allowed', background: 'rgba(255,255,255,0.02)', pointerEvents: 'none' } : {}}
-                        >
-                          <span>{format(d, 'd')}</span>
-                          {conflictLocation && !isPast && (
-                            <AlertTriangle size={10} style={{ position: 'absolute', top: '2px', right: '2px' }} />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                    {/* Month Days Grid (7 columns: Mon to Sun) */}
+                    <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '8px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                      
+                      {/* Day Names Row */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', fontWeight: 700, fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                        <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                      </div>
 
-                </div>
+                      {/* Calendar Grid Cells */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                        {paddingDays.map(p => (
+                          <div key={`pad-${p}`} style={{ height: '36px' }} />
+                        ))}
+
+                        {monthDays.map(d => {
+                          const dStr = format(d, 'yyyy-MM-dd');
+                          const isSelected = selectedDates.includes(dStr);
+                          const isToday = isSameDay(d, new Date());
+                          const isPast = isBefore(startOfDay(d), startOfDay(new Date()));
+                          
+                          // Find existing scheduled shift for selected employee(s) on this date
+                          const targetUids = selectedUserIds.length > 0 ? selectedUserIds : (formUserId ? [formUserId] : []);
+                          const existingShiftOnDate = shifts.find(s => targetUids.includes(s.userId) && s.date === dStr && (!editingShift || s.id !== editingShift.id));
+                          const conflictLocation = existingShiftOnDate ? existingShiftOnDate.branch : null;
+                          const assignedBranch = dateBranches[dStr] || formBranch;
+
+                          return (
+                            <button
+                              key={dStr}
+                              type="button"
+                              disabled={isPast}
+                              onClick={() => !isPast && toggleDateSelection(dStr)}
+                              title={
+                                isPast 
+                                  ? "Past date - cannot be scheduled" 
+                                  : conflictLocation 
+                                    ? `Currently scheduled at ${conflictLocation}` 
+                                    : `${format(d, 'MMM d, yyyy')}: ${assignedBranch}`
+                              }
+                              className={`cal-day-btn${isSelected ? ' selected' : ''}${isToday && !isSelected ? ' is-today' : ''}`}
+                              style={
+                                isPast 
+                                  ? { opacity: 0.3, cursor: 'not-allowed', background: 'rgba(255,255,255,0.02)', pointerEvents: 'none' } 
+                                  : { flexDirection: 'column', padding: '2px 0', height: '42px', position: 'relative' }
+                              }
+                            >
+                              <span style={{ fontSize: '0.8rem', fontWeight: isSelected ? 800 : 600 }}>{format(d, 'd')}</span>
+                              
+                              {isSelected ? (
+                                <span style={{ fontSize: '0.55rem', fontWeight: 800, color: 'var(--accent-gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '95%' }}>
+                                  📍 {locationMode === 'per_date' ? assignedBranch : formBranch}
+                                </span>
+                              ) : conflictLocation && !isPast ? (
+                                <span style={{ fontSize: '0.55rem', fontWeight: 700, color: 'var(--primary)', opacity: 0.9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '95%' }}>
+                                  📍 {conflictLocation}
+                                </span>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                    </div>
+
+                    {/* Per-Date Workplace Prompt (Only the active/last-clicked date) */}
+                    {locationMode === 'per_date' && selectedDates.length > 0 && (
+                      <div style={{ marginTop: '0.85rem', background: 'rgba(15, 23, 42, 0.6)', padding: '0.85rem', borderRadius: '12px', border: '1px solid var(--primary)' }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary)', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.35rem' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <Store size={15} /> Assign Workplace for Selected Date:
+                          </span>
+                          <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                            {Object.keys(dateBranches).filter(d => selectedDates.includes(d)).length}/{selectedDates.length} assigned
+                          </span>
+                        </div>
+
+                        {activeDatePrompt && selectedDates.includes(activeDatePrompt) ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'rgba(245, 158, 11, 0.12)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--accent-gold)' }}>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--accent-gold)', whiteSpace: 'nowrap' }}>
+                              📅 {format(parseISO(activeDatePrompt), 'EEE, MMM d')}
+                            </span>
+                            <select
+                              className="form-select"
+                              value={dateBranches[activeDatePrompt] || formBranch}
+                              onChange={(e) => {
+                                setDateBranches(prev => ({ ...prev, [activeDatePrompt]: e.target.value }));
+                              }}
+                              style={{ fontSize: '0.9rem', padding: '6px 12px', fontWeight: 700, flex: 1 }}
+                              autoFocus
+                            >
+                              {BRANCHES.map(b => (
+                                <option key={b} value={b}>📍 {b}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '0.83rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.5rem 0' }}>
+                            👆 Click a date on the calendar to assign its workplace
+                          </div>
+                        )}
+
+                        {/* Mini summary of already-assigned dates */}
+                        {selectedDates.length > 1 && (
+                          <div style={{ marginTop: '0.65rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                            {selectedDates.map(dStr => {
+                              const branch = dateBranches[dStr];
+                              const isActive = activeDatePrompt === dStr;
+                              return (
+                                <button
+                                  key={dStr}
+                                  type="button"
+                                  onClick={() => setActiveDatePrompt(dStr)}
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    padding: '3px 8px',
+                                    borderRadius: '20px',
+                                    border: isActive ? '1px solid var(--accent-gold)' : '1px solid var(--border-color)',
+                                    background: isActive ? 'rgba(245,158,11,0.18)' : branch ? 'rgba(34,197,94,0.1)' : 'rgba(255,255,255,0.04)',
+                                    color: isActive ? 'var(--accent-gold)' : branch ? '#4ade80' : 'var(--text-muted)',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  {format(parseISO(dStr), 'MMM d')} {branch ? `· ${branch}` : '· unset'}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
 
               </div>
+
+              {/* 4. Shift Timing & Worked Hours (ONLY shown when editing an existing shift) */}
+              {editingShift && (
+                <div className="form-group" style={{ background: 'rgba(255,255,255,0.03)', padding: '0.9rem 1rem', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '1rem' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--accent-gold)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <Clock size={16} /> Shift Timing &amp; Worked Hours
+                    </span>
+                    <span style={{ fontSize: '0.73rem', fontWeight: 600, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                      Auto Break: {getAutoBreakMinutes(formStartTime, formEndTime)}m
+                    </span>
+                  </div>
+
+                  {/* Start Time & End Time */}
+                  <div style={{ display: 'flex', gap: '0.85rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem' }}>Start Time</label>
+                      <input 
+                        type="time" 
+                        className="form-control" 
+                        value={formStartTime} 
+                        onChange={(e) => {
+                          const newStart = e.target.value;
+                          setFormStartTime(newStart);
+                          setFormBreakMinutes(String(getAutoBreakMinutes(newStart, formEndTime)));
+                        }}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.65rem', fontSize: '0.9rem', borderRadius: '8px' }}
+                      />
+                    </div>
+                    <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem' }}>End Time</label>
+                      <input 
+                        type="time" 
+                        className="form-control" 
+                        value={formEndTime} 
+                        onChange={(e) => {
+                          const newEnd = e.target.value;
+                          setFormEndTime(newEnd);
+                          setFormBreakMinutes(String(getAutoBreakMinutes(formStartTime, newEnd)));
+                        }}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.65rem', fontSize: '0.9rem', borderRadius: '8px' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Worked Hours (Sick/Early override) & Notes */}
+                  <div style={{ display: 'flex', gap: '0.85rem', flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--success)', display: 'block', marginBottom: '0.3rem' }}>
+                        Worked Hours <span style={{ fontWeight: 400, opacity: 0.85, fontSize: '0.72rem' }}>(Sick/Early)</span>
+                      </label>
+                      <input 
+                        type="number" 
+                        step="0.5"
+                        min="0"
+                        max="24"
+                        className="form-control" 
+                        value={formActualHours} 
+                        onChange={(e) => setFormActualHours(e.target.value)}
+                        placeholder={`Auto: ${calculateShiftHours(formStartTime, formEndTime, getAutoBreakMinutes(formStartTime, formEndTime))}h`}
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.65rem', fontSize: '0.85rem', borderRadius: '8px', borderColor: formActualHours ? 'var(--success)' : undefined }}
+                      />
+                    </div>
+                    <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem' }}>Shift Notes / Sick Reason</label>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        value={formNote} 
+                        onChange={(e) => setFormNote(e.target.value)}
+                        placeholder="e.g. Left early sick at 14:00"
+                        style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.65rem', fontSize: '0.85rem', borderRadius: '8px' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Action Buttons */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
                 <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: '0.95rem' }}>
-                  <Check size={17} /> {editingShift ? 'Update Shift' : `Save ${selectedDates.length} Shift${selectedDates.length > 1 ? 's' : ''}`}
+                  <Check size={17} /> {
+                    editingShift 
+                      ? 'Update Shift' 
+                      : `Save ${(selectedUserIds.length * selectedDates.length) || selectedDates.length} Shift${(selectedUserIds.length * selectedDates.length) > 1 ? 's' : ''}`
+                  }
                 </button>
                 <button type="button" className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setIsModalOpen(false)}>
                   Cancel
