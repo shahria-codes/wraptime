@@ -447,6 +447,140 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* ─────────────────────────────────────────────────────────
+   MONTHLY REPORT MODAL MOBILE RESPONSIVENESS
+───────────────────────────────────────────────────────── */
+
+.report-modal-content {
+  max-width: 1350px;
+  width: 95vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1.75rem;
+  background: rgba(12, 18, 38, 0.96);
+  border-radius: 16px;
+  box-sizing: border-box;
+}
+
+.report-matrix-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 0 0 10px 10px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+}
+
+@media (max-width: 768px) {
+  .report-modal-content {
+    width: 98vw !important;
+    max-height: 95vh !important;
+    padding: 0.85rem 0.6rem !important;
+    border-radius: 12px !important;
+  }
+
+  .report-header-controls {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.65rem !important;
+    margin-bottom: 0.85rem !important;
+  }
+
+  .report-header-title-box {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+  }
+
+  .report-header-title-box h3 {
+    font-size: 1.05rem !important;
+  }
+
+  .report-header-subtitle {
+    font-size: 0.72rem !important;
+  }
+
+  .report-action-bar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between !important;
+    gap: 0.35rem !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .report-month-nav {
+    padding: 2px 4px !important;
+  }
+
+  .report-month-nav span {
+    min-width: 90px !important;
+    font-size: 0.8rem !important;
+  }
+
+  .report-branch-select-box {
+    flex: 1;
+    min-width: 110px !important;
+  }
+
+  .report-export-btn {
+    padding: 0.4rem 0.65rem !important;
+    font-size: 0.78rem !important;
+  }
+
+  .report-company-header {
+    margin-bottom: 0.85rem !important;
+    padding-bottom: 0.65rem !important;
+  }
+
+  .report-company-header h1 {
+    font-size: 1.25rem !important;
+  }
+
+  .report-company-header h2 {
+    font-size: 0.95rem !important;
+  }
+
+  .report-matrix-table {
+    font-size: 0.75rem !important;
+  }
+
+  .report-matrix-table th,
+  .report-matrix-table td {
+    padding: 0.35rem 0.15rem !important;
+  }
+
+  .emp-name-cell {
+    min-width: 115px !important;
+    max-width: 115px !important;
+    width: 115px !important;
+    padding: 0.35rem 0.35rem !important;
+    font-size: 0.75rem !important;
+    background: #0c1226 !important;
+  }
+
+  .emp-name-cell span {
+    max-width: 80px;
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pdf-hide-avatar {
+    display: none !important;
+  }
+
+  .day-col-header {
+    min-width: 25px !important;
+  }
+
+  .summary-col-header {
+    min-width: 42px !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────
    PDF EXPORT MODE — Compact Fonts, No BG, Clean Page Breaks
 ───────────────────────────────────────────────────────── */
 

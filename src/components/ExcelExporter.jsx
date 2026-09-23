@@ -135,33 +135,24 @@ export const ExcelExporter = ({ isOpen, onClose }) => {
   return createPortal(
     <div className="modal-overlay" style={{ zIndex: 999999 }} onClick={onClose}>
       <div 
-        className="modal-content animate-fade-in print-report-container" 
-        style={{ 
-          maxWidth: '1350px', 
-          width: '95vw', 
-          maxHeight: '92vh', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          padding: '1.75rem',
-          background: 'rgba(12, 18, 38, 0.96)'
-        }}
+        className="modal-content animate-fade-in print-report-container report-modal-content" 
         onClick={(e) => e.stopPropagation()}
       >
         
         {/* Header Controls (Hidden on Print) */}
-        <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', gap: '1rem', flexWrap: 'wrap' }}>
-          <div>
+        <div className="no-print report-header-controls" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', gap: '1rem', flexWrap: 'wrap' }}>
+          <div className="report-header-title-box">
             <h3 style={{ fontSize: '1.35rem', fontWeight: 800, margin: 0, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               <FileText color="var(--primary)" /> Monthly Branch Work Report
             </h3>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+            <p className="report-header-subtitle" style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
               WrapTime • UAB SuperMaistas Official Presence & Hours Log
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+          <div className="report-action-bar" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
             {/* Month Navigator */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'rgba(255,255,255,0.06)', padding: '4px 8px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div className="report-month-nav" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'rgba(255,255,255,0.06)', padding: '4px 8px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
               <button 
                 className="btn btn-sm btn-secondary" 
                 style={{ padding: '2px 6px' }}
@@ -186,7 +177,7 @@ export const ExcelExporter = ({ isOpen, onClose }) => {
             </div>
 
             {/* Branch Selector */}
-            <div style={{ width: '210px' }}>
+            <div className="report-branch-select-box" style={{ width: '210px' }}>
               <GlassSelect
                 options={branchOptions}
                 value={filterBranch}
@@ -197,7 +188,7 @@ export const ExcelExporter = ({ isOpen, onClose }) => {
 
             {/* Export PDF Button (Direct 1-click file download, NO system print popup!) */}
             <button 
-              className="btn btn-primary" 
+              className="btn btn-primary report-export-btn" 
               onClick={handleExportPDF} 
               disabled={isExporting}
               style={{ padding: '0.45rem 1.1rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
@@ -250,7 +241,7 @@ export const ExcelExporter = ({ isOpen, onClose }) => {
                 <div className="branch-banner" style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   padding: '0.65rem 1rem',
                   background: 'transparent',
                   borderRadius: '10px 10px 0 0',
@@ -266,7 +257,7 @@ export const ExcelExporter = ({ isOpen, onClose }) => {
                 </div>
 
                 {/* Table for this Branch (No background color, crisp borders) */}
-                <div style={{ overflowX: 'auto', borderRadius: '0 0 10px 10px', border: '1px solid var(--border-color)', background: 'transparent' }}>
+                <div className="report-matrix-wrapper">
                   <table className="report-matrix-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '0.82rem', fontFamily: 'var(--font-body)' }}>
                     
                     {/* Header Row 1: Branch Title & Summary ColSpans */}
@@ -343,6 +334,7 @@ export const ExcelExporter = ({ isOpen, onClose }) => {
                           return (
                             <th 
                               key={dayNum} 
+                              className="day-col-header"
                               style={{ 
                                 padding: '0.4rem 0.25rem', 
                                 minWidth: '30px',
@@ -360,18 +352,18 @@ export const ExcelExporter = ({ isOpen, onClose }) => {
                         })}
 
                         {/* Branch Summary Header (Days & Hours) */}
-                        <th style={{ padding: '0.4rem', color: 'var(--success)', borderRight: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', minWidth: '55px' }}>
+                        <th className="summary-col-header" style={{ padding: '0.4rem', color: 'var(--success)', borderRight: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', minWidth: '55px' }}>
                           Days
                         </th>
-                        <th style={{ padding: '0.4rem', color: 'var(--success)', borderRight: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', minWidth: '65px' }}>
+                        <th className="summary-col-header" style={{ padding: '0.4rem', color: 'var(--success)', borderRight: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', minWidth: '65px' }}>
                           Hours
                         </th>
 
                         {/* All Branches Summary Header (Days & Hours) */}
-                        <th style={{ padding: '0.4rem', color: '#38BDF8', borderRight: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', minWidth: '55px' }}>
+                        <th className="summary-col-header" style={{ padding: '0.4rem', color: '#38BDF8', borderRight: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', minWidth: '55px' }}>
                           Days
                         </th>
-                        <th style={{ padding: '0.4rem', color: '#38BDF8', borderBottom: '1px solid var(--border-color)', minWidth: '65px' }}>
+                        <th className="summary-col-header" style={{ padding: '0.4rem', color: '#38BDF8', borderBottom: '1px solid var(--border-color)', minWidth: '65px' }}>
                           Hours
                         </th>
                       </tr>
