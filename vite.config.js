@@ -10,8 +10,11 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      devOptions: {
+        enabled: true
+      },
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg', 'logo.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'logo.svg'],
       manifest: {
         name: 'WrapTime - Wraperia Suppa Kebs',
         short_name: 'WrapTime',
@@ -20,6 +23,8 @@ export default defineConfig({
         background_color: '#0F172A',
         display: 'standalone',
         orientation: 'portrait',
+        start_url: '/',
+        scope: '/',
         icons: [
           {
             src: 'pwa-192x192.png',
