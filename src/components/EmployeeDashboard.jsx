@@ -40,13 +40,10 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
   const { showAlert } = useToast();
   const { branchNames, getBranchHoursForDate } = useBranches();
 
-  // Accordion state for roster branch cards { [branchKey]: boolean }
+  // Accordion state for roster branch cards (mutually exclusive: expanding one closes any other)
   const [expandedRosterBranches, setExpandedRosterBranches] = useState({});
   const toggleRosterBranch = (key) => {
-    setExpandedRosterBranches(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
+    setExpandedRosterBranches(prev => (prev[key] ? {} : { [key]: true }));
   };
 
   const [shifts, setShifts] = useState([]);
@@ -689,7 +686,7 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
               </div>
             </div>
 
-            {/* Check-In Controls (Hidden if employee already completed their shift for today) */}
+            {/* Check-In Controls */}
             {todaysCompletedShifts.length > 0 && !todaysShift ? (
               <div style={{
                 display: 'inline-flex',
@@ -706,60 +703,54 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                 <CheckCircle2 size={16} />
                 <span>All Done For Today</span>
               </div>
+            ) : todaysShift ? (
+              <button
+                type="button"
+                onClick={() => openCheckInModal(todaysShift)}
+                style={{
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                  color: '#FFF',
+                  padding: '0.7rem 1.4rem',
+                  borderRadius: '12px',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  boxShadow: '0 4px 16px rgba(16, 185, 129, 0.35)',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+              >
+                <LogIn size={17} />
+                Check In ({todaysShift.branch})
+              </button>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                {!todaysShift && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <MapPin size={14} style={{ color: 'var(--primary)' }} />
-                    <select
-                      value={checkInBranch}
-                      onChange={(e) => setCheckInBranch(e.target.value)}
-                      style={{
-                        background: 'rgba(11, 19, 38, 0.85)',
-                        border: '1px solid var(--border-glass)',
-                        color: 'var(--text-main)',
-                        padding: '0.55rem 0.85rem',
-                        borderRadius: '10px',
-                        fontSize: '0.82rem',
-                        fontWeight: 600,
-                        outline: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {branchNames.map(b => (
-                        <option key={b} value={b} style={{ background: '#0B1326', color: '#FFF' }}>
-                          {b}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => openCheckInModal(todaysShift)}
-                  style={{
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-                    color: '#FFF',
-                    padding: '0.7rem 1.4rem',
-                    borderRadius: '12px',
-                    fontWeight: 800,
-                    fontSize: '0.88rem',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    boxShadow: '0 4px 16px rgba(16, 185, 129, 0.35)',
-                    transition: 'all 0.2s ease'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-                >
-                  <LogIn size={17} />
-                  {todaysShift ? `Check In (${todaysShift.branch})` : 'Clock In Now'}
-                </button>
-              </div>
+              <button
+                type="button"
+                disabled
+                title="No work scheduled for today"
+                style={{
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  color: 'var(--text-subtle)',
+                  padding: '0.7rem 1.4rem',
+                  borderRadius: '12px',
+                  fontWeight: 700,
+                  fontSize: '0.88rem',
+                  cursor: 'not-allowed',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  opacity: 0.5
+                }}
+              >
+                <LogIn size={17} />
+                Check In
+              </button>
             )}
 
           </div>

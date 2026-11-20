@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useAuth } from '../context/AuthContext';
 import { useBranches } from '../context/BranchContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -123,7 +124,7 @@ const BranchScheduleEditor = ({ branch, DAYS, onSave, onDelete }) => {
       </div>
 
       {/* 7 Day Rows */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.4rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '0.45rem' }}>
         {DAYS.map(day => {
           const cfg = schedule[day] || { open: '09:00', close: '22:00', closed: false };
           return (
@@ -133,44 +134,51 @@ const BranchScheduleEditor = ({ branch, DAYS, onSave, onDelete }) => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '0.35rem 0.55rem',
-                borderRadius: '6px',
+                flexWrap: 'wrap',
+                gap: '0.45rem',
+                padding: '0.45rem 0.65rem',
+                borderRadius: '8px',
                 background: cfg.closed ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255, 255, 255, 0.03)',
-                border: cfg.closed ? '1px dashed rgba(239, 68, 68, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)'
+                border: cfg.closed ? '1px dashed rgba(239, 68, 68, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
+                boxSizing: 'border-box'
               }}
             >
-              <span style={{ fontWeight: 800, fontSize: '0.78rem', color: cfg.closed ? '#F87171' : 'var(--accent-gold)', width: '36px' }}>
-                {day}
-              </span>
+              {/* Day Badge & Closed Toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontWeight: 800, fontSize: '0.8rem', color: cfg.closed ? '#F87171' : 'var(--accent-gold)', minWidth: '34px' }}>
+                  {day}
+                </span>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: 'var(--text-muted)', cursor: 'pointer', margin: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={!!cfg.closed}
-                  onChange={e => handleDayChange(day, 'closed', e.target.checked)}
-                  style={{ accentColor: '#EF4444' }}
-                />
-                Closed
-              </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem', color: cfg.closed ? '#FCA5A5' : 'var(--text-muted)', cursor: 'pointer', margin: 0, userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!cfg.closed}
+                    onChange={e => handleDayChange(day, 'closed', e.target.checked)}
+                    style={{ accentColor: '#EF4444', width: '13px', height: '13px', cursor: 'pointer' }}
+                  />
+                  <span>Closed</span>
+                </label>
+              </div>
 
+              {/* Time Inputs or Closed Badge */}
               {!cfg.closed ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginLeft: 'auto' }}>
                   <input
                     type="time"
                     value={cfg.open || '09:00'}
                     onChange={e => handleDayChange(day, 'open', e.target.value)}
-                    style={{ width: '82px', padding: '2px 4px', fontSize: '0.75rem', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-color)', color: '#FFF', borderRadius: '4px' }}
+                    style={{ width: '78px', padding: '2px 4px', fontSize: '0.75rem', background: 'rgba(0,0,0,0.45)', border: '1px solid var(--border-color)', color: '#FFF', borderRadius: '4px', textAlign: 'center', boxSizing: 'border-box' }}
                   />
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>-</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>-</span>
                   <input
                     type="time"
                     value={cfg.close || '22:00'}
                     onChange={e => handleDayChange(day, 'close', e.target.value)}
-                    style={{ width: '82px', padding: '2px 4px', fontSize: '0.75rem', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-color)', color: '#FFF', borderRadius: '4px' }}
+                    style={{ width: '78px', padding: '2px 4px', fontSize: '0.75rem', background: 'rgba(0,0,0,0.45)', border: '1px solid var(--border-color)', color: '#FFF', borderRadius: '4px', textAlign: 'center', boxSizing: 'border-box' }}
                   />
                 </div>
               ) : (
-                <span style={{ fontSize: '0.72rem', color: '#F87171', fontStyle: 'italic' }}>
+                <span style={{ fontSize: '0.72rem', color: '#F87171', fontWeight: 600, marginLeft: 'auto', background: 'rgba(239,68,68,0.12)', padding: '2px 7px', borderRadius: '4px', border: '1px solid rgba(239,68,68,0.25)' }}>
                   Closed All Day
                 </span>
               )}
@@ -214,6 +222,7 @@ const BranchScheduleEditor = ({ branch, DAYS, onSave, onDelete }) => {
 
 export const BranchManagerModal = ({ isOpen, onClose }) => {
   const { branches, branchNames, createBranch, deleteBranch, saveBranchSchedule, DAYS } = useBranches();
+  const { userProfile, user } = useAuth();
   const { showAlert, showConfirm } = useToast();
   const [newBranchName, setNewBranchName] = useState('');
   const [expandedBranchId, setExpandedBranchId] = useState(null);
@@ -229,7 +238,10 @@ export const BranchManagerModal = ({ isOpen, onClose }) => {
       return;
     }
     try {
-      const newId = await createBranch(name);
+      const newId = await createBranch(name, null, {
+        createdBy: user?.uid || userProfile?.uid,
+        createdByName: userProfile?.displayName || user?.displayName
+      });
       setNewBranchName('');
       setExpandedBranchId(newId);
       showAlert(`Branch "${name}" created! Configure its operating hours below.`, 'success');
@@ -262,7 +274,7 @@ export const BranchManagerModal = ({ isOpen, onClose }) => {
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100 }}>
       <div
         className="modal-content animate-fade-in"
-        style={{ maxWidth: '640px', maxHeight: '90vh', overflowY: 'auto' }}
+        style={{ maxWidth: '680px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -343,7 +355,7 @@ export const BranchManagerModal = ({ isOpen, onClose }) => {
                   flexWrap: 'wrap',
                   gap: '0.5rem'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--accent-gold)' }}>
                       📍 {branch.name}
                     </span>
@@ -358,6 +370,19 @@ export const BranchManagerModal = ({ isOpen, onClose }) => {
                     }}>
                       {openDaysCount === 7 ? 'Open 7 days' : `Open ${openDaysCount}/7 days`}
                     </span>
+                    {branch.createdByName && (
+                      <span style={{
+                        fontSize: '0.66rem',
+                        fontWeight: 600,
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: 'var(--text-muted)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)'
+                      }}>
+                        Manager: {branch.createdByName}
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>

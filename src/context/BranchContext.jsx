@@ -6,6 +6,62 @@ export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const defaultDayHours = () =>
   Object.fromEntries(DAYS.map(d => [d, { open: '09:00', close: '22:00', closed: false }]));
 
+// Branches created by first manager (Jakaria)
+export const isJakariaBranch = (branchName = '', branchId = '') => {
+  const s = `${branchName} ${branchId}`.toLowerCase().trim();
+  return (
+    s.includes('antakalnis') ||
+    s.includes('paupys') ||
+    s.includes('paupio') ||
+    s.includes('vilnius outlet') ||
+    s.includes('outlet')
+  );
+};
+
+export const JAKARIA_BRANCH_NAMES = ['antakalnis', 'paupys', 'paupys turgus', 'paupio turgus', 'vilnius outlet'];
+
+/**
+ * Filter branches to only those created by the specified manager.
+ * - Jakaria created Antakalnis, Paupys Turgus, Vilnius Outlet
+ * - Nur created the remaining branches
+ * - Any newly created branch matches via createdBy (UID) or createdByName
+ */
+export const getManagerBranches = (user, branches = []) => {
+  if (!user || user.role !== 'manager') return [];
+  const uid = user.uid || user.id;
+  const name = (user.displayName || '').toLowerCase();
+  const email = (user.email || '').toLowerCase();
+  const isJakaria = name.includes('jakaria') || email.includes('jakaria');
+  const isNur = name.includes('nur') || email.includes('nur');
+
+  return branches.filter(branch => {
+    const isJakBranch = isJakariaBranch(branch.name, branch.id);
+
+    // If it's a known Jakaria branch (Antakalnis, Paupys Turgus, Vilnius Outlet)
+    if (isJakBranch) {
+      return isJakaria;
+    }
+
+    // Direct match by createdBy (UID) if explicitly stored and not a Jakaria branch
+    if (branch.createdBy && uid && branch.createdBy === uid) return true;
+
+    // Direct match by createdByName
+    if (branch.createdByName && user.displayName) {
+      const bCreator = branch.createdByName.toLowerCase();
+      if (bCreator.includes('jakaria') && isJakaria) return true;
+      if (bCreator.includes('nur') && isNur) return true;
+      if (bCreator === name) return true;
+    }
+
+    // If it's Nur and not a Jakaria branch, it belongs to Nur
+    if (isNur) {
+      return !isJakBranch;
+    }
+
+    return false;
+  });
+};
+
 const BranchContext = createContext(null);
 
 export const useBranches = () => {
@@ -23,7 +79,17 @@ export const BranchProvider = ({ children }) => {
       collection(db, 'branches'),
       (snap) => {
         const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        snap.forEach(d => {
+          const data = d.data();
+          const isJak = isJakariaBranch(data.name, d.id);
+          let createdByName = isJak ? 'Jakaria' : (data.createdByName || 'Nur');
+          list.push({ id: d.id, ...data, createdByName });
+
+          // Ensure Firestore is updated so Jakaria branches always store 'Jakaria'
+          if (data.createdByName !== createdByName) {
+            setDoc(doc(db, 'branches', d.id), { createdByName }, { merge: true }).catch(() => {});
+          }
+        });
         list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         setBranches(list);
         setLoading(false);
@@ -36,16 +102,19 @@ export const BranchProvider = ({ children }) => {
     return () => unsub();
   }, []);
 
-  /** Create a new branch. docId derived from name. */
-  const createBranch = async (name, initialSchedule = null) => {
+  /** Create a new branch with optional creator metadata. docId derived from name. */
+  const createBranch = async (name, initialSchedule = null, metadata = {}) => {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Branch name cannot be empty');
     const id = trimmed.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    await setDoc(doc(db, 'branches', id), {
+    const data = {
       name: trimmed,
       schedule: initialSchedule || defaultDayHours(),
-      createdAt: new Date().toISOString()
-    });
+      createdAt: new Date().toISOString(),
+      ...(metadata?.createdBy ? { createdBy: metadata.createdBy } : {}),
+      ...(metadata?.createdByName ? { createdByName: metadata.createdByName } : {})
+    };
+    await setDoc(doc(db, 'branches', id), data, { merge: true });
     return id;
   };
 
@@ -116,6 +185,7 @@ export const BranchProvider = ({ children }) => {
       saveBranchSchedule,
       updateBranch,
       getBranchHoursForDate,
+      getManagerBranches,
       DAYS,
       defaultDayHours
     }}>

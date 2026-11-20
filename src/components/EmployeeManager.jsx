@@ -34,12 +34,15 @@ const STATUS_MAP = {
 
 /* ── Compact employee card ───────────────────────────────── */
 const EmployeeCard = ({ user, isSelf, shifts, onStatus, onBranch, navigate }) => {
-  const { branchNames } = useBranches();
+  const { branches, branchNames, getManagerBranches } = useBranches();
   const uid          = user.uid || user.id;
   const isPending    = user.status === 'pending';
   const isManager    = user.role   === 'manager';
   const isAuthorized = user.status === 'authorized';
   const st           = STATUS_MAP[user.status] || STATUS_MAP.rejected;
+
+  // Manager branches: strictly branches created by this manager
+  const managerCreatedBranches = isManager ? (getManagerBranches ? getManagerBranches(user, branches) : []) : [];
 
   /* Working stats */
   const getHours = s => {
@@ -199,15 +202,15 @@ const EmployeeCard = ({ user, isSelf, shifts, onStatus, onBranch, navigate }) =>
       {/* ── Branch + contacts row ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 1rem 0.75rem', gap: '0.5rem', minHeight: '38px' }}>
 
-        {/* Manager: show branch name chips / Employee: branch dropdown */}
+        {/* Manager: show only branches created by this manager / Employee: branch dropdown */}
         {isManager ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flex: 1, minWidth: 0, flexWrap: 'wrap' }}>
             <Store size={12} color="var(--primary)" style={{ flexShrink: 0 }} />
-            {branchNames.length === 0 ? (
-              <span style={{ fontSize: '0.73rem', color: 'var(--text-subtle)', fontFamily: 'var(--font-body)', fontStyle: 'italic' }}>No branches yet</span>
+            {managerCreatedBranches.length === 0 ? (
+              <span style={{ fontSize: '0.73rem', color: 'var(--text-subtle)', fontFamily: 'var(--font-body)', fontStyle: 'italic' }}>No branches created yet</span>
             ) : (
-              branchNames.map(b => (
-                <span key={b} style={{
+              managerCreatedBranches.map(b => (
+                <span key={b.id || b.name} style={{
                   display: 'inline-flex', alignItems: 'center',
                   fontSize: '0.68rem', fontWeight: 700,
                   padding: '2px 8px', borderRadius: '99px',
@@ -217,7 +220,7 @@ const EmployeeCard = ({ user, isSelf, shifts, onStatus, onBranch, navigate }) =>
                   whiteSpace: 'nowrap',
                   fontFamily: 'var(--font-body)',
                 }}>
-                  📍 {b}
+                  📍 {b.name}
                 </span>
               ))
             )}

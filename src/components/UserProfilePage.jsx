@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useBranches } from '../context/BranchContext';
 import { UserAvatar } from './UserAvatar';
 import { db, collection, onSnapshot, doc, updateDoc } from '../firebase';
 import {
@@ -18,7 +19,6 @@ import {
   Check,
   X,
   Loader2,
-  ExternalLink,
   GraduationCap,
   BookOpen,
   Sparkles,
@@ -297,6 +297,7 @@ const StyleTag = () => {
 export const UserProfilePage = () => {
   const { userId: paramUserId } = useParams();
   const { userProfile: currentUserProfile, user: currentUser, logout } = useAuth();
+  const { branches, getManagerBranches } = useBranches();
   const navigate = useNavigate();
   const { showAlert } = useToast();
 
@@ -439,6 +440,7 @@ export const UserProfilePage = () => {
   );
 
   const isManager = profileUser.role === 'manager';
+  const managerBranches = isManager && getManagerBranches ? getManagerBranches(profileUser, branches) : [];
   const empty = <span className="prof-field-empty">{isOwnProfile ? '—' : 'Not provided'}</span>;
 
   /* ── Render ── */
@@ -520,9 +522,23 @@ export const UserProfilePage = () => {
                     <UserCheck size={13} /> Staff Employee
                   </span>
                 )}
-                <span className="badge" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                  <Store size={13} /> {profileUser.defaultBranch || 'Unassigned'}
-                </span>
+                {isManager ? (
+                  managerBranches.length > 0 ? (
+                    managerBranches.map(b => (
+                      <span key={b.name} className="badge badge-amber" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem' }}>
+                        <Store size={13} /> 📍 {b.name}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="badge" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                      <Store size={13} /> No branches created
+                    </span>
+                  )
+                ) : (
+                  <span className="badge" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                    <Store size={13} /> {profileUser.defaultBranch || 'Unassigned'}
+                  </span>
+                )}
                 {(profileUser.dobMonth || profileUser.dobDay) && (
                   <span className="badge badge-amber" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
                     🎂 {profileUser.dobMonth} {profileUser.dobDay}

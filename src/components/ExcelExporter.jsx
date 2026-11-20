@@ -8,7 +8,6 @@ import {
   ChevronLeft, 
   ChevronRight, 
   ArrowLeft,
-  Store, 
   FileText,
   Download,
   Loader2,
@@ -27,6 +26,20 @@ import {
 
 // In-memory cache map for monthly shifts to minimize DB hits and enable instant 0ms month transitions
 const shiftMonthCache = new Map();
+
+const formatSingleName = (displayName) => {
+  if (!displayName) return 'Staff';
+  const clean = String(displayName).trim();
+  if (!clean) return 'Staff';
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'Staff';
+  const first = parts[0];
+  const lettersOnly = first.replace(/[^a-zA-Z]/g, '');
+  if (lettersOnly.length > 2) {
+    return first;
+  }
+  return parts[1] || first || 'Staff';
+};
 
 export const ExcelExporter = ({ selectedBranch }) => {
   const navigate = useNavigate();
@@ -361,12 +374,17 @@ export const ExcelExporter = ({ selectedBranch }) => {
                         const hoursAllBranches = empAllMonthShifts.reduce((acc, s) => acc + getShiftWorkedHours(s), 0);
 
                         return (
-                          <div key={empUid} className="glass-card" style={{ padding: '0.9rem 1rem', borderRadius: '12px', border: '1px solid var(--border-color)', background: 'rgba(30,41,59,0.7)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                          <div key={empUid} className="glass-card" style={{ padding: '0.85rem 1rem', borderRadius: '12px', border: '1px solid var(--border-color)', background: 'rgba(30,41,59,0.7)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                                 <UserAvatar photoURL={emp.photoURL} displayName={emp.displayName} size={34} />
                                 <div>
-                                  <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#FFF' }}>{emp.displayName}</div>
+                                  <div
+                                    title={emp.displayName}
+                                    style={{ fontWeight: 800, fontSize: '0.95rem', color: '#FFF' }}
+                                  >
+                                    {formatSingleName(emp.displayName)}
+                                  </div>
                                   <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
                                     All Branches Total: <strong style={{ color: '#38BDF8' }}>{countWorkAllBranches}d ({hoursAllBranches.toFixed(1)}h)</strong>
                                   </div>
@@ -379,21 +397,6 @@ export const ExcelExporter = ({ selectedBranch }) => {
                                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>at {branchName}</div>
                               </div>
                             </div>
-
-                            {/* Worked Days List */}
-                            {empThisBranchShifts.length > 0 ? (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.5rem' }}>
-                                {empThisBranchShifts.map(s => (
-                                  <span key={s.id || `${s.date}-${s.startTime}`} className="badge" style={{ fontSize: '0.72rem', padding: '3px 8px', background: 'rgba(255,255,255,0.08)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                    🗓️ {s.date.split('-').slice(1).join('/')}: {s.startTime}-{s.endTime} ({getShiftWorkedHours(s).toFixed(1)}h)
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.3rem' }}>
-                                No shifts scheduled at {branchName} this month
-                              </div>
-                            )}
                           </div>
                         );
                       })
@@ -412,7 +415,7 @@ export const ExcelExporter = ({ selectedBranch }) => {
                           style={{ 
                             padding: '0.65rem 0.85rem', 
                             textAlign: 'left', 
-                            minWidth: '170px', 
+                            minWidth: '135px', 
                             position: 'sticky', 
                             left: 0, 
                             background: 'rgba(12, 18, 38, 0.98)', 
@@ -562,8 +565,11 @@ export const ExcelExporter = ({ selectedBranch }) => {
                                   <div className="pdf-hide-avatar">
                                     <UserAvatar photoURL={emp.photoURL} displayName={emp.displayName} size={24} />
                                   </div>
-                                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {emp.displayName}
+                                  <span
+                                    title={emp.displayName}
+                                    style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                  >
+                                    {formatSingleName(emp.displayName)}
                                   </span>
                                 </div>
                               </td>

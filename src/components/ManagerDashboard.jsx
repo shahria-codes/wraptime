@@ -55,14 +55,11 @@ export const ManagerDashboard = ({ selectedBranch }) => {
   const [editingShift, setEditingShift] = useState(null);
   const [isBranchModalOpen, setIsBranchModalOpen] = useState(false);
 
-  // Accordion state for branch cards { [branchKey]: boolean }
+  // Accordion state for branch cards (mutually exclusive: expanding one closes any other)
   const [expandedBranches, setExpandedBranches] = useState({});
 
   const toggleBranch = (key) => {
-    setExpandedBranches(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
+    setExpandedBranches(prev => (prev[key] ? {} : { [key]: true }));
   };
 
   // Quick Multi-Date Scheduler State
