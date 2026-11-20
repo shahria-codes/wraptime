@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { db, collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from '../firebase';
-import { BRANCHES } from './Navbar';
+import { useBranches } from '../context/BranchContext';
 import { UserAvatar } from './UserAvatar';
+import { BranchManagerModal } from './BranchManagerModal';
 import { 
   Calendar as CalendarIcon, 
   ChevronLeft, 
   ChevronRight, 
+  ChevronDown,
   Plus, 
   Trash2, 
   Edit3, 
@@ -42,6 +44,7 @@ import { useToast } from '../context/ToastContext';
 
 export const ManagerDashboard = ({ selectedBranch }) => {
   const { showAlert, showConfirm } = useToast();
+  const { branches, branchNames, getBranchHoursForDate } = useBranches();
   const [currentWeekStart, setCurrentWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [shifts, setShifts] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -50,11 +53,22 @@ export const ManagerDashboard = ({ selectedBranch }) => {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingShift, setEditingShift] = useState(null);
+  const [isBranchModalOpen, setIsBranchModalOpen] = useState(false);
+
+  // Accordion state for branch cards { [branchKey]: boolean }
+  const [expandedBranches, setExpandedBranches] = useState({});
+
+  const toggleBranch = (key) => {
+    setExpandedBranches(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
 
   // Quick Multi-Date Scheduler State
   const [formUserId, setFormUserId] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState([]);
-  const [formBranch, setFormBranch] = useState(selectedBranch !== 'ALL' ? selectedBranch : 'Panorama');
+  const [formBranch, setFormBranch] = useState(selectedBranch !== 'ALL' ? selectedBranch : (branchNames[0] || ''));
   const [locationMode, setLocationMode] = useState('same'); // 'same', 'per_date', or 'per_employee'
   const [userBranches, setUserBranches] = useState({}); // { [uid]: branch }
   const [dateBranches, setDateBranches] = useState({}); // { [dateStr]: branch }
@@ -105,6 +119,22 @@ export const ManagerDashboard = ({ selectedBranch }) => {
     return map;
   }, [employees]);
 
+  // When branch or date changes in the modal, auto-fill shift times from branch settings for that day
+  const applyBranchHours = (branchName, dateStr) => {
+    if (!branchName) return;
+    const targetDate = dateStr || (selectedDates[0] ? selectedDates[0] : format(new Date(), 'yyyy-MM-dd'));
+    const hours = getBranchHoursForDate(branchName, targetDate);
+    if (hours) {
+      if (hours.closed) {
+        showAlert(`${branchName} is marked as Closed on this day.`, 'warning');
+      } else {
+        setFormStartTime(hours.open || '09:00');
+        setFormEndTime(hours.close || '22:00');
+        setFormBreakMinutes(String(getAutoBreakMinutes(hours.open || '09:00', hours.close || '22:00')));
+      }
+    }
+  };
+
   const getShiftWorkedHours = (s) => {
     if (!s) return 0;
     if (s.actualHours !== undefined && s.actualHours !== null && s.actualHours !== '') {
@@ -126,10 +156,25 @@ export const ManagerDashboard = ({ selectedBranch }) => {
     return Math.max(0, netMinutes / 60);
   };
 
+  const formatSingleName = (displayName) => {
+    if (!displayName) return 'Staff';
+    const clean = String(displayName).trim();
+    if (!clean) return 'Staff';
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return 'Staff';
+    const first = parts[0];
+    const lettersOnly = first.replace(/[^a-zA-Z]/g, '');
+    if (lettersOnly.length > 2) {
+      return first;
+    }
+    return parts[1] || first || 'Staff';
+  };
+
   const getEmpWorkingStats = (userId, displayName) => {
     const userShifts = shifts.filter(s => s.userId === userId || (displayName && s.userDisplayName === displayName));
-    const daysWorked = new Set(userShifts.map(s => s.date)).size;
-    const totalHours = userShifts.reduce((acc, s) => acc + getShiftWorkedHours(s), 0);
+    const attendedShifts = userShifts.filter(s => s.status === 'completed' || s.status === 'checked-in' || !!s.checkInTime);
+    const daysWorked = new Set(attendedShifts.map(s => s.date)).size;
+    const totalHours = attendedShifts.reduce((acc, s) => acc + getShiftWorkedHours(s), 0);
     return { daysWorked, totalHours };
   };
 
@@ -173,12 +218,17 @@ export const ManagerDashboard = ({ selectedBranch }) => {
     setSelectedUserIds(firstUid ? [firstUid] : []);
   };
 
-  const handleOpenAddModal = (targetDateStr = null, defaultBranch = 'Panorama') => {
+  const handleOpenAddModal = (targetDateStr = null, defaultBranch = null) => {
+    if (branchNames.length === 0) {
+      showAlert('Please create at least one branch before scheduling shifts.', 'warning');
+      setIsBranchModalOpen(true);
+      return;
+    }
     setEditingShift(null);
     const firstUid = schedulableEmployees[0]?.uid || schedulableEmployees[0]?.id || '';
     setFormUserId(firstUid);
     setSelectedUserIds(firstUid ? [firstUid] : []);
-    const initialBranch = selectedBranch !== 'ALL' ? selectedBranch : defaultBranch;
+    const initialBranch = selectedBranch !== 'ALL' ? selectedBranch : (defaultBranch || branchNames[0] || '');
     setFormBranch(initialBranch);
     setLocationMode('same');
 
@@ -195,9 +245,17 @@ export const ManagerDashboard = ({ selectedBranch }) => {
     }
     setDateBranches(initialDateMap);
 
-    setFormStartTime('09:00');
-    setFormEndTime('22:00');
-    setFormBreakMinutes('60');
+    const targetDate = targetDateStr || format(new Date(), 'yyyy-MM-dd');
+    const branchHours = getBranchHoursForDate(initialBranch, targetDate);
+    if (branchHours && !branchHours.closed) {
+      setFormStartTime(branchHours.open || '09:00');
+      setFormEndTime(branchHours.close || '22:00');
+      setFormBreakMinutes(String(getAutoBreakMinutes(branchHours.open || '09:00', branchHours.close || '22:00')));
+    } else {
+      setFormStartTime('09:00');
+      setFormEndTime('22:00');
+      setFormBreakMinutes('60');
+    }
     setFormActualHours('');
     setFormNote('');
 
@@ -426,7 +484,7 @@ export const ManagerDashboard = ({ selectedBranch }) => {
             <CalendarIcon color="var(--primary)" /> Schedule Builder
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-            Schedule employees across all 5 branches.
+            Schedule employees across workplace branches.
           </p>
         </div>
 
@@ -456,9 +514,39 @@ export const ManagerDashboard = ({ selectedBranch }) => {
           🗓️ {format(currentWeekStart, 'MMM dd')} - {format(endOfWeek(currentWeekStart, { weekStartsOn: 1 }), 'MMM dd, yyyy')}
         </div>
         <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-          Active Location: <span className="badge badge-amber">{selectedBranch === 'ALL' ? 'All 5 Branches' : selectedBranch}</span>
+          Active Location: <span className="badge badge-amber">{selectedBranch === 'ALL' ? 'All Branches' : selectedBranch}</span>
         </div>
       </div>
+
+      {/* Empty Branches Onboarding Hero Banner */}
+      {branches.length === 0 && (
+        <div className="glass-panel animate-fade-in" style={{
+          textAlign: 'center',
+          padding: '2.5rem 1.5rem',
+          marginBottom: '1.5rem',
+          border: '1.5px dashed var(--accent-gold)',
+          background: 'rgba(245, 158, 11, 0.05)',
+          borderRadius: '12px'
+        }}>
+          <div style={{ width: 54, height: 54, borderRadius: '50%', background: 'rgba(245, 158, 11, 0.15)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: '0.75rem' }}>
+            <Store size={28} color="var(--primary)" />
+          </div>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: '0 0 0.4rem', color: 'var(--text-main)' }}>
+            No Branches Created Yet
+          </h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', maxWidth: '440px', margin: '0 auto 1.25rem' }}>
+            Welcome Manager! Please set up your first workplace branch to begin creating schedules and tracking attendance.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setIsBranchModalOpen(true)}
+            style={{ padding: '0.6rem 1.3rem', fontSize: '0.9rem' }}
+          >
+            <Plus size={16} /> Create Your First Branch
+          </button>
+        </div>
+      )}
 
       {/* Weekly Schedule Grid (7 Days) */}
       <div className="grid-week">
@@ -509,103 +597,259 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                     No shifts scheduled
                   </div>
                 ) : (
-                  dayShifts.map((shift) => {
-                    const hrs = shift.actualHours !== undefined && shift.actualHours !== null
-                      ? parseFloat(shift.actualHours).toFixed(1)
-                      : calculateShiftHours(shift.startTime, shift.endTime, shift.breakMinutes);
+                  (() => {
+                    const shiftsByBranch = dayShifts.reduce((acc, shift) => {
+                      const b = shift.branch || 'Unassigned';
+                      if (!acc[b]) acc[b] = [];
+                      acc[b].push(shift);
+                      return acc;
+                    }, {});
 
-                    return (
-                      <div
-                        key={shift.id}
-                        style={{
-                          background: 'rgba(15, 23, 42, 0.75)',
-                          border: '1px solid var(--border-color)',
-                          borderLeft: '3px solid var(--primary)',
-                          borderRadius: '8px',
-                          padding: '0.45rem 0.6rem',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '0.3rem',
-                          marginBottom: '0.35rem',
-                          boxSizing: 'border-box',
-                          width: '100%',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        {/* Top Line: Avatar + Employee Name + Action Buttons */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.35rem', width: '100%' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0, flex: 1 }}>
-                            <UserAvatar
-                              photoURL={employeeMap[shift.userId]?.photoURL || shift.photoURL}
-                              displayName={shift.userDisplayName}
-                              size={22}
-                            />
+                    return Object.entries(shiftsByBranch).map(([branchName, branchShiftsList]) => {
+                      const accordionKey = `${dateStr}-${branchName}`;
+                      const isExpanded = !!expandedBranches[accordionKey];
+                      const firstShift = branchShiftsList[0];
+                      const allSameTime = branchShiftsList.every(
+                        s => (s.startTime || '09:00') === (firstShift.startTime || '09:00') &&
+                             (s.endTime || '22:00') === (firstShift.endTime || '22:00')
+                      );
+                      const sharedTimeStr = `${firstShift.startTime || '09:00'} - ${firstShift.endTime || '22:00'}`;
+                      const branchHours = getBranchHoursForDate(branchName, dateStr);
+                      const branchHoursStr = branchHours?.closed
+                        ? 'Closed'
+                        : branchHours?.open && branchHours?.close
+                          ? `${branchHours.open} - ${branchHours.close}`
+                          : (allSameTime ? sharedTimeStr : `${firstShift.startTime || '09:00'} - ${firstShift.endTime || '22:00'}`);
+                      const checkedInCount = branchShiftsList.filter(s => s.status === 'checked-in').length;
+
+                      return (
+                        <div
+                          key={branchName}
+                          style={{
+                            background: 'rgba(15, 23, 42, 0.78)',
+                            border: '1px solid var(--border-color)',
+                            borderLeft: `3px solid ${checkedInCount > 0 ? '#34D399' : 'var(--primary)'}`,
+                            borderRadius: '8px',
+                            marginBottom: '0.35rem',
+                            boxSizing: 'border-box',
+                            width: '100%',
+                            overflow: 'hidden',
+                            transition: 'all 0.15s ease',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.2)'
+                          }}
+                        >
+                          {/* Accordion Header — always visible, click to expand */}
+                          <button
+                            type="button"
+                            onClick={() => toggleBranch(accordionKey)}
+                            style={{
+                              width: '100%',
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '0.4rem 0.5rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                              textAlign: 'left'
+                            }}
+                          >
+                            {/* Branch name */}
                             <span style={{
-                              fontWeight: 700,
-                              fontSize: '0.82rem',
-                              color: '#FFFFFF',
+                              fontSize: '0.75rem',
+                              fontWeight: 800,
+                              color: 'var(--accent-gold)',
                               whiteSpace: 'nowrap',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
-                              lineHeight: 1.2
+                              flex: 1,
+                              minWidth: 0,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem'
                             }}>
-                              {shift.userDisplayName}
+                              📍 {branchName}
                             </span>
-                          </div>
 
-                          {/* Action Buttons */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
-                            <button 
-                              type="button"
-                              className="btn btn-sm btn-secondary" 
-                              style={{ padding: '2px 5px', minHeight: '22px', fontSize: '0.65rem' }}
-                              onClick={() => handleOpenEditModal(shift)}
-                              title="Edit shift"
-                            >
-                              <Edit3 size={11} />
-                            </button>
-                            <button 
-                              type="button"
-                              className="btn btn-sm btn-danger" 
-                              style={{ padding: '2px 5px', minHeight: '22px', fontSize: '0.65rem' }}
-                              onClick={() => handleDeleteShift(shift.id)}
-                              title="Delete shift"
-                            >
-                              <Trash2 size={11} />
-                            </button>
-                          </div>
+                            {/* Avatar stack (up to 3) */}
+                            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                              {branchShiftsList.slice(0, 3).map((shift, idx) => (
+                                <div
+                                  key={shift.id}
+                                  title={shift.userDisplayName}
+                                  style={{
+                                    marginLeft: idx === 0 ? 0 : '-6px',
+                                    zIndex: 3 - idx,
+                                    position: 'relative',
+                                    border: '1.5px solid rgba(15,23,42,0.9)',
+                                    borderRadius: '50%'
+                                  }}
+                                >
+                                  <UserAvatar
+                                    photoURL={employeeMap[shift.userId]?.photoURL || shift.photoURL}
+                                    displayName={shift.userDisplayName}
+                                    size={18}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Chevron */}
+                            <ChevronDown
+                              size={12}
+                              style={{
+                                color: 'var(--text-muted)',
+                                flexShrink: 0,
+                                transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                transition: 'transform 0.2s ease'
+                              }}
+                            />
+                          </button>
+
+                          {/* Expandable staff list */}
+                          {isExpanded && (
+                            <div style={{
+                              borderTop: '1px solid rgba(255,255,255,0.07)',
+                              padding: '0.3rem 0.5rem 0.4rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.25rem'
+                            }}>
+                              {/* Branch Opening & Closing Hours (shown when expanded) */}
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '0.15rem 0.2rem 0.3rem',
+                                borderBottom: '1px dashed rgba(255,255,255,0.08)',
+                                fontSize: '0.67rem',
+                                color: 'var(--text-muted)',
+                                marginBottom: '0.15rem'
+                              }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: 'var(--accent-gold)', fontWeight: 700 }}>
+                                  <Clock size={11} /> {branchHoursStr}
+                                </span>
+                                <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>
+                                  {branchShiftsList.length} staff
+                                </span>
+                              </div>
+
+                              {branchShiftsList.map((shift) => (
+                                <div
+                                  key={shift.id}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '0.3rem',
+                                    padding: '2px 0',
+                                    minHeight: '24px'
+                                  }}
+                                >
+                                  {/* Left: Avatar + Name + Check-in/out time */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0, flex: 1 }}>
+                                    <UserAvatar
+                                      photoURL={employeeMap[shift.userId]?.photoURL || shift.photoURL}
+                                      displayName={shift.userDisplayName || employeeMap[shift.userId]?.displayName}
+                                      size={22}
+                                    />
+                                    <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                      <div style={{
+                                        fontWeight: 700,
+                                        fontSize: '0.78rem',
+                                        color: '#FFFFFF',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        lineHeight: 1.2
+                                      }}>
+                                        {formatSingleName(shift.userDisplayName || employeeMap[shift.userId]?.displayName || employeeMap[shift.userId]?.email?.split('@')[0])}
+                                      </div>
+                                      {/* Check-in / Check-out time bottom of employee name */}
+                                      <div style={{
+                                        fontSize: '0.63rem',
+                                        lineHeight: 1.2,
+                                        marginTop: '1px'
+                                      }}>
+                                        {shift.checkInTime ? (
+                                          shift.checkOutTime ? (
+                                            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>
+                                              In: {shift.checkInTime} • Out: {shift.checkOutTime}
+                                            </span>
+                                          ) : (
+                                            <span style={{
+                                              color: '#34D399',
+                                              fontWeight: 700,
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '3px'
+                                            }}>
+                                              <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#34D399', boxShadow: '0 0 4px #34D399' }} />
+                                              In: {shift.checkInTime}
+                                            </span>
+                                          )
+                                        ) : (
+                                          <span style={{ color: 'rgba(255,255,255,0.38)', fontWeight: 500 }}>
+                                            Not checked in
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {shift.note && (
+                                      <span title={shift.note} style={{ cursor: 'help', fontSize: '0.65rem', flexShrink: 0 }}>📝</span>
+                                    )}
+                                  </div>
+
+                                  {/* Right: Actions */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                                    <button
+                                      type="button"
+                                      style={{
+                                        background: 'rgba(255,255,255,0.06)',
+                                        border: '1px solid rgba(255,255,255,0.08)',
+                                        color: 'var(--text-muted)',
+                                        padding: '2px 4px',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        lineHeight: 1
+                                      }}
+                                      onClick={() => handleOpenEditModal(shift)}
+                                      title="Edit shift"
+                                    >
+                                      <Edit3 size={10} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      style={{
+                                        background: 'rgba(239,68,68,0.1)',
+                                        border: '1px solid rgba(239,68,68,0.25)',
+                                        color: '#F87171',
+                                        padding: '2px 4px',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        lineHeight: 1
+                                      }}
+                                      onClick={() => handleDeleteShift(shift.id)}
+                                      title="Delete shift"
+                                    >
+                                      <Trash2 size={10} />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-
-                        {/* Bottom Line: Shift Time & Hours, Branch Pill & Note */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.35rem', width: '100%', flexWrap: 'wrap' }}>
-                          <div style={{
-                            fontSize: '0.72rem',
-                            fontWeight: 700,
-                            color: 'var(--accent-gold)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.25rem',
-                            whiteSpace: 'nowrap'
-                          }}>
-                            <Clock size={11} style={{ flexShrink: 0 }} />
-                            <span>{shift.startTime || '09:00'}-{shift.endTime || '22:00'}</span>
-                            <span style={{ color: 'var(--success)', fontWeight: 800 }}>({hrs}h)</span>
-                          </div>
-
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
-                            {selectedBranch === 'ALL' && (
-                              <span style={{ fontSize: '0.63rem', color: 'var(--primary)', fontWeight: 600, background: 'rgba(245,158,11,0.1)', padding: '1px 5px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
-                                📍 {shift.branch}
-                              </span>
-                            )}
-                            {shift.note && (
-                              <span title={shift.note} style={{ cursor: 'help', fontSize: '0.72rem' }}>📝</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
+                      );
+                    });
+                  })()
                 )}
               </div>
             </div>
@@ -660,14 +904,14 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                   >
                     {schedulableEmployees.map(emp => (
                       <option key={emp.uid || emp.id} value={emp.uid || emp.id}>
-                        {emp.displayName} ({emp.assignedBranch || 'Employee'})
+                        {formatSingleName(emp.displayName)} ({emp.assignedBranch || 'Employee'})
                       </option>
                     ))}
                   </select>
                 ) : (
                   <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(145px, 1fr))',
+                    display: 'flex',
+                    flexWrap: 'wrap',
                     gap: '0.45rem',
                     maxHeight: '160px',
                     overflowY: 'auto',
@@ -685,12 +929,13 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                           key={uid}
                           onClick={() => toggleUserSelection(uid)}
                           style={{
-                            display: 'flex',
+                            display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.4rem',
                             padding: '0.45rem 0.6rem',
                             borderRadius: '8px',
                             cursor: 'pointer',
+                            width: 'fit-content',
                             background: isSelected ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.03)',
                             border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-color)',
                             transition: 'all 0.15s ease'
@@ -702,11 +947,8 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                             fontWeight: 700,
                             color: isSelected ? 'var(--primary)' : 'var(--text-main)',
                             whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            flex: 1
                           }}>
-                            {emp.displayName}
+                            {formatSingleName(emp.displayName)}
                           </span>
                           <input
                             type="checkbox"
@@ -770,11 +1012,13 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                       const newU = {};
                       selectedUserIds.forEach(u => { newU[u] = val; });
                       setUserBranches(newU);
+                      // Auto-fill shift times from branch settings for selected date
+                      applyBranchHours(val, selectedDates[0]);
                     }}
                     required
                     style={{ fontSize: '0.95rem', padding: '0.65rem 0.9rem' }}
                   >
-                    {BRANCHES.map(b => (
+                    {branchNames.map(b => (
                       <option key={b} value={b}>📍 {b}</option>
                     ))}
                   </select>
@@ -926,7 +1170,7 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                               style={{ fontSize: '0.9rem', padding: '6px 12px', fontWeight: 700, flex: 1 }}
                               autoFocus
                             >
-                              {BRANCHES.map(b => (
+                              {branchNames.map(b => (
                                 <option key={b} value={b}>📍 {b}</option>
                               ))}
                             </select>
@@ -1069,6 +1313,9 @@ export const ManagerDashboard = ({ selectedBranch }) => {
         </div>,
         document.body
       )}
+
+      {/* Branch & Operating Hours Manager Modal */}
+      <BranchManagerModal isOpen={isBranchModalOpen} onClose={() => setIsBranchModalOpen(false)} />
 
     </div>
   );

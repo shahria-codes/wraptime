@@ -46,14 +46,16 @@ export const AuthProvider = ({ children }) => {
             let initialStatus = 'pending';
 
             try {
-              const q = query(collection(db, 'users'), where('role', '==', 'manager'));
-              const querySnap = await getDocs(q);
-              if (querySnap.empty) {
+              const allUsersSnap = await getDocs(collection(db, 'users'));
+              const hasManager = allUsersSnap.docs.some(d => d.data().role === 'manager');
+              if (allUsersSnap.empty || !hasManager) {
                 initialRole = 'manager';
                 initialStatus = 'authorized';
               }
             } catch (e) {
               console.warn('Firestore manager lookup on bootstrap:', e);
+              initialRole = 'manager';
+              initialStatus = 'authorized';
             }
 
             const newProfile = {
@@ -69,6 +71,28 @@ export const AuthProvider = ({ children }) => {
 
             await setDoc(userRef, newProfile);
             setUserProfile(newProfile);
+
+            // Notify manager of new user registration
+            if (initialStatus === 'pending') {
+              try {
+                const notifRef = doc(collection(db, 'notifications'));
+                await setDoc(notifRef, {
+                  id: notifRef.id,
+                  type: 'NEW_USER_PENDING',
+                  title: 'New Staff Member Joined',
+                  message: `${newProfile.displayName} registered and requested authorization.`,
+                  targetUserId: currentUser.uid,
+                  userName: newProfile.displayName,
+                  userEmail: newProfile.email,
+                  userPhotoURL: newProfile.photoURL,
+                  status: 'pending',
+                  read: false,
+                  createdAt: new Date().toISOString()
+                });
+              } catch (notifErr) {
+                console.warn('Failed to publish new user notification:', notifErr);
+              }
+            }
           }
           setLoading(false);
         }, (err) => {

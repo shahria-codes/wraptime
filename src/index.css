@@ -27,6 +27,8 @@
   --border-glass:   rgba(255, 255, 255, 0.10);
   --border-accent:  rgba(245, 158, 11, 0.35);
   --border-bright:  rgba(255, 255, 255, 0.18);
+  --border-color:   rgba(255, 255, 255, 0.10);
+  --bg-card:        rgba(255, 255, 255, 0.05);
 
   /* ── Inset highlight (Apple's top-edge shine) ── */
   --inset-shine:    inset 0 1px 0 rgba(255, 255, 255, 0.12);

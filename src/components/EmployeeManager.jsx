@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { UserAvatar } from './UserAvatar';
 import { db, collection, onSnapshot, doc, updateDoc } from '../firebase';
-import { BRANCHES } from './Navbar';
+import { useBranches } from '../context/BranchContext';
 import {
   Users, CheckCircle2, XCircle, ShieldCheck, UserCheck,
-  Store, Search, Mail, Lock, Clock, Phone, ExternalLink,
+  Store, Search, Mail, Lock, Phone, ExternalLink,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
@@ -33,7 +33,8 @@ const STATUS_MAP = {
 };
 
 /* ── Compact employee card ───────────────────────────────── */
-const EmployeeCard = ({ user, isSelf, currentUid, shifts, onStatus, onBranch, navigate }) => {
+const EmployeeCard = ({ user, isSelf, shifts, onStatus, onBranch, navigate }) => {
+  const { branchNames } = useBranches();
   const uid          = user.uid || user.id;
   const isPending    = user.status === 'pending';
   const isManager    = user.role   === 'manager';
@@ -58,8 +59,10 @@ const EmployeeCard = ({ user, isSelf, currentUid, shifts, onStatus, onBranch, na
   };
 
   const userShifts  = shifts.filter(s => s.userId === uid || (user.displayName && s.userDisplayName === user.displayName));
-  const daysWorked  = new Set(userShifts.map(s => s.date)).size;
-  const totalHours  = userShifts.reduce((acc, s) => acc + getHours(s), 0);
+  // Only count shifts after employee has checked in or completed
+  const attendedShifts = userShifts.filter(s => s.status === 'completed' || s.status === 'checked-in' || !!s.checkInTime);
+  const daysWorked  = new Set(attendedShifts.map(s => s.date)).size;
+  const totalHours  = attendedShifts.reduce((acc, s) => acc + getHours(s), 0);
 
   /* Card accent colour: gold for self, muted for others */
   const accentBorder = isSelf
@@ -77,30 +80,33 @@ const EmployeeCard = ({ user, isSelf, currentUid, shifts, onStatus, onBranch, na
       border: accentBorder,
       boxShadow: '0 4px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08)',
       overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
       transition: 'transform 0.2s ease, box-shadow 0.2s ease',
     }}
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.1)'; }}
       onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)';    e.currentTarget.style.boxShadow = '0 4px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08)'; }}
     >
 
-      {/* ── Top strip: avatar + name + status ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', padding: '1rem 1rem 0.8rem' }}>
+      {/* ── Top strip: avatar + name + email + tags (fixed height so all cards align) ── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem', padding: '1rem 1rem 0.8rem', height: '110px', boxSizing: 'border-box', overflow: 'hidden' }}>
         {/* Avatar */}
-        <div style={{ position: 'relative', flexShrink: 0 }}>
-          <UserAvatar photoURL={user.photoURL} displayName={user.displayName} size={46} />
-          {/* Online-dot style status indicator */}
+        <div style={{ position: 'relative', flexShrink: 0, marginTop: '2px' }}>
+          <UserAvatar photoURL={user.photoURL} displayName={user.displayName} size={48} />
           <span style={{
             position: 'absolute', bottom: 0, right: 0,
-            width: '11px', height: '11px', borderRadius: '50%',
+            width: '12px', height: '12px', borderRadius: '50%',
             background: st.color,
             border: '2px solid #080E1E',
             boxShadow: `0 0 6px ${st.color}88`,
           }} />
         </div>
 
-        {/* Name + email + role */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+        {/* Name + email + tags */}
+        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          {/* Name — single line, ellipsis on overflow, full name on hover */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
             <span
               onClick={() => navigate(isSelf ? '/profile' : `/profile/${uid}`)}
               style={{
@@ -110,22 +116,41 @@ const EmployeeCard = ({ user, isSelf, currentUid, shifts, onStatus, onBranch, na
                 color: 'var(--text-main)',
                 cursor: 'pointer',
                 letterSpacing: '-0.2px',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                maxWidth: '160px',
+                lineHeight: 1.25,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                display: 'block',
+                minWidth: 0,
               }}
               title={user.displayName}
             >
               {user.displayName || 'Unnamed'}
             </span>
             {isSelf && (
-              <span style={{ fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: '99px', background: 'rgba(245,158,11,0.18)', color: 'var(--primary)', border: '1px solid rgba(245,158,11,0.35)', letterSpacing: '0.04em' }}>YOU</span>
+              <span style={{ flexShrink: 0, fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: '99px', background: 'rgba(245,158,11,0.18)', color: 'var(--primary)', border: '1px solid rgba(245,158,11,0.35)', letterSpacing: '0.04em' }}>YOU</span>
             )}
           </div>
-          <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '1px', fontFamily: 'var(--font-body)' }}>
-            <Mail size={10} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>{user.email}</span>
+
+          {/* Email */}
+          <div style={{
+            fontSize: '0.74rem',
+            color: 'var(--text-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.3rem',
+            marginTop: '3px',
+            fontFamily: 'var(--font-body)',
+            overflow: 'hidden',
+            lineHeight: 1.3
+          }}>
+            <Mail size={11} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</span>
           </div>
-          {/* Role pill */}
-          <div style={{ marginTop: '4px' }}>
+
+          {/* Role + Status tags side-by-side */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '6px', flexWrap: 'wrap' }}>
+            {/* Role pill */}
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: '3px',
               fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
@@ -135,25 +160,26 @@ const EmployeeCard = ({ user, isSelf, currentUid, shifts, onStatus, onBranch, na
               border: isManager ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(56,189,248,0.25)',
             }}>
               {isManager ? <ShieldCheck size={9} /> : <UserCheck size={9} />}
-              {isManager ? 'Manager' : 'Staff'}
+              {isManager ? 'Manager' : 'Employee'}
+            </span>
+
+            {/* Status chip */}
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.04em',
+              padding: '2px 8px', borderRadius: '99px',
+              background: st.bg, color: st.color, border: `1px solid ${st.border}`,
+              whiteSpace: 'nowrap',
+            }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: st.color }} />
+              {st.label}
             </span>
           </div>
         </div>
-
-        {/* Status badge top-right */}
-        <span style={{
-          alignSelf: 'flex-start',
-          fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.05em',
-          padding: '3px 9px', borderRadius: '99px',
-          background: st.bg, color: st.color, border: `1px solid ${st.border}`,
-          whiteSpace: 'nowrap',
-        }}>
-          {st.label}
-        </span>
       </div>
 
-      {/* ── Stats row ── */}
-      {!isManager && (
+      {/* ── Stats row (Employees only; Managers have role badge) ── */}
+      {!isManager ? (
         <div style={{
           display: 'flex', gap: '0', margin: '0 1rem 0.8rem',
           background: 'rgba(0,0,0,0.2)', borderRadius: '10px',
@@ -167,32 +193,55 @@ const EmployeeCard = ({ user, isSelf, currentUid, shifts, onStatus, onBranch, na
             <div style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-gold)', lineHeight: 1.1 }}>{totalHours.toFixed(0)}</div>
             <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '1px' }}>Hours</div>
           </div>
-          <div style={{ flex: 1, textAlign: 'center', padding: '0.5rem 0.25rem', borderLeft: '1px solid rgba(255,255,255,0.06)' }}>
-            <div style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', fontWeight: 800, color: '#7DD3FC', lineHeight: 1.1 }}>{userShifts.length}</div>
-            <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '1px' }}>Shifts</div>
-          </div>
         </div>
-      )}
+      ) : null}
 
       {/* ── Branch + contacts row ── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 1rem 0.75rem', gap: '0.5rem' }}>
-        {/* Branch dropdown — employees only */}
-        {!isManager && (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 1rem 0.75rem', gap: '0.5rem', minHeight: '38px' }}>
+
+        {/* Manager: show branch name chips / Employee: branch dropdown */}
+        {isManager ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flex: 1, minWidth: 0, flexWrap: 'wrap' }}>
+            <Store size={12} color="var(--primary)" style={{ flexShrink: 0 }} />
+            {branchNames.length === 0 ? (
+              <span style={{ fontSize: '0.73rem', color: 'var(--text-subtle)', fontFamily: 'var(--font-body)', fontStyle: 'italic' }}>No branches yet</span>
+            ) : (
+              branchNames.map(b => (
+                <span key={b} style={{
+                  display: 'inline-flex', alignItems: 'center',
+                  fontSize: '0.68rem', fontWeight: 700,
+                  padding: '2px 8px', borderRadius: '99px',
+                  background: 'rgba(245,158,11,0.1)',
+                  color: 'var(--accent-gold)',
+                  border: '1px solid rgba(245,158,11,0.25)',
+                  whiteSpace: 'nowrap',
+                  fontFamily: 'var(--font-body)',
+                }}>
+                  📍 {b}
+                </span>
+              ))
+            )}
+          </div>
+        ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flex: 1, minWidth: 0 }}>
             <Store size={12} color="var(--primary)" style={{ flexShrink: 0 }} />
             <select
               className="form-select"
               style={{ fontSize: '0.76rem', padding: '4px 8px', borderRadius: '8px', fontFamily: 'var(--font-body)', fontWeight: 600, flex: 1, minWidth: 0 }}
-              value={user.defaultBranch || 'Panorama'}
+              value={user.defaultBranch || (branchNames[0] || '')}
               onChange={e => onBranch(uid, e.target.value)}
             >
-              {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+              {branchNames.length === 0 ? (
+                <option value="">No branches configured</option>
+              ) : (
+                branchNames.map(b => <option key={b} value={b}>{b}</option>)
+              )}
             </select>
           </div>
         )}
 
         {/* Contact icon links */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0, marginLeft: isManager ? 'auto' : undefined }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0, minHeight: '28px' }}>
           {user.phone && (
             <a href={`tel:${user.phone}`} title={user.phone}
               style={{ display:'flex', alignItems:'center', justifyContent:'center', width:28, height:28, borderRadius:8, background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.22)', color:'var(--primary)', textDecoration:'none' }}>
@@ -212,11 +261,10 @@ const EmployeeCard = ({ user, isSelf, currentUid, shifts, onStatus, onBranch, na
             </a>
           )}
         </div>
-
       </div>
 
-      {/* ── Footer action strip ── */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', display:'flex', gap:'0' }}>
+      {/* ── Footer action strip (Anchored to bottom on every card) ── */}
+      <div style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.06)', display:'flex', minHeight: '40px', background: 'rgba(0,0,0,0.1)' }}>
         {/* Profile link */}
         <button
           onClick={() => navigate(isSelf ? '/profile' : `/profile/${uid}`)}
@@ -328,7 +376,7 @@ export const EmployeeManager = () => {
       {/* ── Page header ── */}
       <div style={{ marginBottom: '1.5rem' }}>
         <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-main)', display:'flex', alignItems:'center', gap:'0.5rem', letterSpacing:'-0.3px', marginBottom:'0.25rem' }}>
-          <Users size={22} color="var(--primary)" /> Staff Directory
+          <Users size={22} color="var(--primary)" /> Employee Directory
         </h2>
         <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.83rem', color: 'var(--text-muted)' }}>
           Manage access roles, branch assignments, and view working statistics.
@@ -400,7 +448,6 @@ export const EmployeeManager = () => {
                 key={uid}
                 user={user}
                 isSelf={isSelf}
-                currentUid={currentUserProfile?.uid}
                 shifts={shifts}
                 onStatus={updateUserStatus}
                 onBranch={updateUserBranch}

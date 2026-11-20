@@ -417,8 +417,10 @@ export const UserProfilePage = () => {
     s.userId === targetUid ||
     (profileUser?.displayName && s.userDisplayName === profileUser.displayName)
   );
-  const daysWorked = new Set(userShifts.map(s => s.date)).size;
-  const totalHours = userShifts.reduce((a, s) => a + getWorkedHours(s), 0);
+  // Only count shifts after checked in or completed
+  const attendedShifts = userShifts.filter(s => s.status === 'completed' || s.status === 'checked-in' || !!s.checkInTime);
+  const daysWorked = new Set(attendedShifts.map(s => s.date)).size;
+  const totalHours = attendedShifts.reduce((a, s) => a + getWorkedHours(s), 0);
 
   /* ── Loading ── */
   if (loading) return (
@@ -519,7 +521,7 @@ export const UserProfilePage = () => {
                   </span>
                 )}
                 <span className="badge" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                  <Store size={13} /> {profileUser.defaultBranch || 'Panorama'}
+                  <Store size={13} /> {profileUser.defaultBranch || 'Unassigned'}
                 </span>
                 {(profileUser.dobMonth || profileUser.dobDay) && (
                   <span className="badge badge-amber" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>

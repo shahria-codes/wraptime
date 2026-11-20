@@ -3,6 +3,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { UserAvatar } from './UserAvatar';
 import { ProfileModal } from './ProfileModal';
+import { BranchManagerModal } from './BranchManagerModal';
+import { NotificationCenter } from './NotificationCenter';
+import { useNotifications } from '../context/NotificationContext';
 import {
   Calendar,
   Users,
@@ -12,24 +15,21 @@ import {
   UserCheck,
   Clock,
   Store,
-  Camera
+  Camera,
+  Settings
 } from 'lucide-react';
 
 import { GlassSelect } from './GlassSelect';
-
-export const BRANCHES = [
-  'Panorama',
-  'Vilnius Outlet',
-  'Antakalnio',
-  'Paupio Turgus',
-  'Verkių'
-];
+import { useBranches } from '../context/BranchContext';
 
 export const Navbar = ({ selectedBranch, setSelectedBranch }) => {
   const { userProfile, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [branchModalOpen, setBranchModalOpen] = useState(false);
+  const { branchNames } = useBranches();
+  const { unreadCount } = useNotifications();
 
   const isManager    = userProfile?.role === 'manager';
   const isAuthorized = userProfile?.status === 'authorized';
@@ -135,10 +135,21 @@ export const Navbar = ({ selectedBranch, setSelectedBranch }) => {
                 }}
               >
                 <option value="ALL">🏢 All Branches</option>
-                {BRANCHES.map(b => (
+                {branchNames.map(b => (
                   <option key={b} value={b}>📍 {b}</option>
                 ))}
               </select>
+              {isManager && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => setBranchModalOpen(true)}
+                  style={{ padding: '0.3rem 0.45rem', display: 'flex', alignItems: 'center' }}
+                  title="Manage Branches & Hours"
+                >
+                  <Settings size={14} />
+                </button>
+              )}
             </div>
           )}
 
@@ -174,68 +185,72 @@ export const Navbar = ({ selectedBranch, setSelectedBranch }) => {
             </nav>
           )}
 
-          {/* User Avatar + Role + Logout — desktop only; mobile uses bottom nav Profile tab */}
-          {userProfile && (
-            <div
-              className="desktop-only"
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.45rem',
-                padding: '4px 8px',
-                background: 'rgba(255,255,255,0.04)',
-                borderRadius: 10,
-                border: '1px solid var(--border-color)',
-                flexShrink: 0
-              }}
-            >
-              {/* Clickable avatar & name → opens /profile route */}
-              <button
-                onClick={() => navigate('/profile')}
-                title="View & Edit My Profile"
+          {/* Right Header: Notifications + User Profile */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
+            {isManager && <NotificationCenter />}
+
+            {userProfile && (
+              <div
+                className="desktop-only"
                 style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  padding: 0, position: 'relative', borderRadius: '50%',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  display: 'flex', alignItems: 'center', gap: '0.45rem',
+                  padding: '4px 8px',
+                  background: 'rgba(255,255,255,0.04)',
+                  borderRadius: 10,
+                  border: '1px solid var(--border-color)',
+                  flexShrink: 0
                 }}
               >
-                <UserAvatar
-                  photoURL={userProfile.photoURL}
-                  displayName={userProfile.displayName}
-                  size={30}
-                />
-              </button>
+                {/* Clickable avatar & name → opens /profile route */}
+                <button
+                  onClick={() => navigate('/profile')}
+                  title="View & Edit My Profile"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    padding: 0, position: 'relative', borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}
+                >
+                  <UserAvatar
+                    photoURL={userProfile.photoURL}
+                    displayName={userProfile.displayName}
+                    size={30}
+                  />
+                </button>
 
-              <div 
-                style={{ display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
-                onClick={() => navigate('/profile')}
-                title="View & Edit My Profile"
-              >
-                <span style={{
-                  fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)',
-                  maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                }}>
-                  {userProfile.displayName}
-                </span>
-                {isManager ? (
-                  <span className="badge badge-amber" style={{ fontSize: '0.5rem', padding: '1px 4px' }}>
-                    <ShieldCheck size={9} /> Manager
+                <div 
+                  style={{ display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+                  onClick={() => navigate('/profile')}
+                  title="View & Edit My Profile"
+                >
+                  <span style={{
+                    fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)',
+                    maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                  }}>
+                    {userProfile.displayName}
                   </span>
-                ) : (
-                  <span className="badge badge-blue" style={{ fontSize: '0.5rem', padding: '1px 4px' }}>
-                    <UserCheck size={9} /> Staff
-                  </span>
-                )}
+                  {isManager ? (
+                    <span className="badge badge-amber" style={{ fontSize: '0.5rem', padding: '1px 4px' }}>
+                      <ShieldCheck size={9} /> Manager
+                    </span>
+                  ) : (
+                    <span className="badge badge-blue" style={{ fontSize: '0.5rem', padding: '1px 4px' }}>
+                      <UserCheck size={9} /> Staff
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  className="btn btn-sm btn-secondary"
+                  onClick={logout}
+                  title="Log Out"
+                  style={{ padding: '0.3rem 0.5rem', marginLeft: 2 }}
+                >
+                  <LogOut size={14} />
+                </button>
               </div>
-
-              <button
-                className="btn btn-sm btn-secondary"
-                onClick={logout}
-                title="Log Out"
-                style={{ padding: '0.3rem 0.5rem', marginLeft: 2 }}
-              >
-                <LogOut size={14} />
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </header>
 
@@ -253,8 +268,24 @@ export const Navbar = ({ selectedBranch, setSelectedBranch }) => {
               <button
                 className={`mobile-nav-btn ${path === '/employees' || path === '/approvals' ? 'active' : ''}`}
                 onClick={() => navigate('/employees')}
+                style={{ position: 'relative' }}
               >
-                <Users size={22} /><span>Employees</span>
+                <div style={{ position: 'relative', display: 'inline-flex' }}>
+                  <Users size={22} />
+                  {unreadCount > 0 && (
+                    <span style={{
+                      position: 'absolute',
+                      top: '-3px',
+                      right: '-6px',
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: '#EF4444',
+                      boxShadow: '0 0 6px #EF4444'
+                    }} />
+                  )}
+                </div>
+                <span>Employees</span>
               </button>
             </>
           ) : (
@@ -303,6 +334,9 @@ export const Navbar = ({ selectedBranch, setSelectedBranch }) => {
 
       {/* ─── Profile Modal ───────────────────────────────── */}
       <ProfileModal isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
+
+      {/* ─── Branch Manager Modal ──────────────────────────── */}
+      <BranchManagerModal isOpen={branchModalOpen} onClose={() => setBranchModalOpen(false)} />
     </>
   );
 };

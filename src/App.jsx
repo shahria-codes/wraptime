@@ -180,13 +180,19 @@ const AppRoutes = () => {
 };
 
 import { ToastProvider } from './context/ToastContext';
+import { BranchProvider } from './context/BranchContext';
+import { NotificationProvider } from './context/NotificationContext';
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <AppRoutes />
+          <BranchProvider>
+            <NotificationProvider>
+              <AppRoutes />
+            </NotificationProvider>
+          </BranchProvider>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

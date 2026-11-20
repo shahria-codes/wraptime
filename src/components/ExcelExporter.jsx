@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import html2pdf from 'html2pdf.js';
 import { db, collection, onSnapshot, query, where } from '../firebase';
-import { BRANCHES } from './Navbar';
+import { useBranches } from '../context/BranchContext';
 import { UserAvatar } from './UserAvatar';
 import { 
   ChevronLeft, 
@@ -30,6 +30,7 @@ const shiftMonthCache = new Map();
 
 export const ExcelExporter = ({ selectedBranch }) => {
   const navigate = useNavigate();
+  const { branchNames } = useBranches();
   const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()));
   const filterBranch = selectedBranch || 'ALL';
   const [displayMode, setDisplayMode] = useState(() => {
@@ -132,7 +133,7 @@ export const ExcelExporter = ({ selectedBranch }) => {
   };
 
   // List of branches to render separately based on global Navbar selection
-  const branchesToRender = filterBranch === 'ALL' ? BRANCHES : [filterBranch];
+  const branchesToRender = filterBranch === 'ALL' ? branchNames : [filterBranch];
 
   // Direct PDF File Download Handler — ALWAYS exports as a clean Table Matrix PDF document
   const handleExportPDF = () => {
@@ -298,6 +299,26 @@ export const ExcelExporter = ({ selectedBranch }) => {
           {branchesToRender.map((branchName) => {
             const branchShiftsInMonth = monthShifts.filter(s => s.branch === branchName);
 
+            // Only employees who worked at this specific branch this month
+            const branchEmployees = employees.filter(emp => {
+              const uid = emp.uid || emp.id;
+              return branchShiftsInMonth.some(s => s.userId === uid || s.userDisplayName === emp.displayName);
+            });
+
+            // Also include any staff with shifts at this branch if not already in employees list
+            const empUidSet = new Set(employees.map(e => e.uid || e.id));
+            branchShiftsInMonth.forEach(s => {
+              if (s.userId && !empUidSet.has(s.userId)) {
+                if (!branchEmployees.some(e => (e.uid || e.id) === s.userId)) {
+                  branchEmployees.push({
+                    uid: s.userId,
+                    displayName: s.userDisplayName || 'Unknown Staff',
+                    photoURL: null
+                  });
+                }
+              }
+            });
+
             return (
               <div key={branchName} className="branch-matrix-block" style={{ marginBottom: '2.25rem' }}>
                 
@@ -323,10 +344,12 @@ export const ExcelExporter = ({ selectedBranch }) => {
                 {/* Cards View vs Table View */}
                 {displayMode === 'cards' ? (
                   <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem', background: 'rgba(15,23,42,0.6)', borderRadius: '0 0 10px 10px', border: '1px solid var(--border-color)' }}>
-                    {employees.length === 0 ? (
-                      <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>No staff members found</div>
+                    {branchEmployees.length === 0 ? (
+                      <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        No employees worked at this branch this month
+                      </div>
                     ) : (
-                      employees.map((emp) => {
+                      branchEmployees.map((emp) => {
                         const empUid = emp.uid || emp.id;
                         const empAllMonthShifts = monthShifts.filter(s => s.userId === empUid || s.userDisplayName === emp.displayName);
                         const empThisBranchShifts = empAllMonthShifts.filter(s => s.branch === branchName);
@@ -490,16 +513,16 @@ export const ExcelExporter = ({ selectedBranch }) => {
                       </tr>
                     </thead>
 
-                    {/* Third Row Onwards: 1 Row per Employee */}
+                    {/* Third Row Onwards: 1 Row per Employee who worked at this branch */}
                     <tbody>
-                      {employees.length === 0 ? (
+                      {branchEmployees.length === 0 ? (
                         <tr>
                           <td colSpan={monthDays.length + 5} style={{ padding: '2rem', color: 'var(--text-muted)' }}>
-                            No authorized staff employees found
+                            No employees worked at this branch this month
                           </td>
                         </tr>
                       ) : (
-                        employees.map((emp) => {
+                        branchEmployees.map((emp) => {
                           const empUid = emp.uid || emp.id;
 
                           // Shifts for this employee across all branches in current month
