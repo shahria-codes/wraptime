@@ -40,7 +40,27 @@ export const NotificationProvider = ({ children }) => {
 
     const notifQuery = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
     const unsubNotifs = onSnapshot(notifQuery, (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 days ago in ms
+      const stale = [];
+      const list = [];
+
+      snapshot.docs.forEach(d => {
+        const data = d.data();
+        const createdMs = data.createdAt ? new Date(data.createdAt).getTime() : 0;
+        if (createdMs > 0 && createdMs < cutoff) {
+          stale.push(d.id);
+        } else {
+          list.push({ id: d.id, ...data });
+        }
+      });
+
+      // Silently purge stale notifications (fire-and-forget, no UI impact)
+      if (stale.length > 0) {
+        stale.forEach(id => {
+          deleteDoc(doc(db, 'notifications', id)).catch(() => {});
+        });
+      }
+
       setRawNotifications(list);
       setLoading(false);
     }, (err) => {
