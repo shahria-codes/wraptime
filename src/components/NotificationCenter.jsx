@@ -1,21 +1,29 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNotifications } from '../context/NotificationContext';
+import { useNotifications, formatSingleName } from '../context/NotificationContext';
+import { useAuth } from '../context/AuthContext';
 import { UserAvatar } from './UserAvatar';
 import {
   Bell,
   CheckCircle2,
   XCircle,
   X,
-  CheckCheck
+  CheckCheck,
+  ArrowLeftRight,
+  Clock,
+  Trash2
 } from 'lucide-react';
-import { formatDistanceToNow, parseISO } from 'date-fns';
+import { formatDistanceToNow, parseISO, format } from 'date-fns';
 
 export const NotificationCenter = () => {
+  const { userProfile } = useAuth();
   const {
     notifications,
     unreadCount,
     handleApproveUser,
     handleRejectUser,
+    handleApproveSwap,
+    handleRejectSwap,
+    handleCancelSwap,
     markAllAsRead,
     dismissNotification
   } = useNotifications();
@@ -23,6 +31,8 @@ export const NotificationCenter = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [processingId, setProcessingId] = useState(null);
   const panelRef = useRef(null);
+
+  const myUid = userProfile?.uid;
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -42,7 +52,7 @@ export const NotificationCenter = () => {
     };
   }, [isOpen]);
 
-  const onApprove = async (userId, notifId, e) => {
+  const onApproveUser = async (userId, notifId, e) => {
     e.stopPropagation();
     setProcessingId(userId);
     try {
@@ -52,11 +62,41 @@ export const NotificationCenter = () => {
     }
   };
 
-  const onReject = async (userId, notifId, e) => {
+  const onRejectUser = async (userId, notifId, e) => {
     e.stopPropagation();
     setProcessingId(userId);
     try {
       await handleRejectUser(userId, notifId);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const onApproveSwap = async (item, e) => {
+    e.stopPropagation();
+    setProcessingId(item.id);
+    try {
+      await handleApproveSwap(item);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const onRejectSwap = async (item, e) => {
+    e.stopPropagation();
+    setProcessingId(item.id);
+    try {
+      await handleRejectSwap(item);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const onCancelSwap = async (item, e) => {
+    e.stopPropagation();
+    setProcessingId(item.id);
+    try {
+      await handleCancelSwap(item.id);
     } finally {
       setProcessingId(null);
     }
@@ -68,6 +108,15 @@ export const NotificationCenter = () => {
       return formatDistanceToNow(parseISO(isoString), { addSuffix: true });
     } catch {
       return 'Recently';
+    }
+  };
+
+  const formatFriendlyDate = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      return format(parseISO(dateStr), 'EEE, MMM d');
+    } catch {
+      return dateStr;
     }
   };
 
@@ -133,14 +182,14 @@ export const NotificationCenter = () => {
             position: 'absolute',
             top: 'calc(100% + 10px)',
             right: 0,
-            width: '340px',
-            maxWidth: '90vw',
-            background: 'rgba(11, 19, 38, 0.96)',
+            width: '370px',
+            maxWidth: '92vw',
+            background: 'rgba(11, 19, 38, 0.97)',
             backdropFilter: 'blur(24px) saturate(180%)',
             WebkitBackdropFilter: 'blur(24px) saturate(180%)',
             border: '1px solid rgba(245, 158, 11, 0.35)',
             borderRadius: '16px',
-            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.65), 0 0 20px rgba(245, 158, 11, 0.1)',
+            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.75), 0 0 20px rgba(245, 158, 11, 0.12)',
             zIndex: 10000,
             overflow: 'hidden',
             animation: 'fadeIn 0.15s ease-out'
@@ -222,7 +271,7 @@ export const NotificationCenter = () => {
           {/* List of Notifications */}
           <div
             style={{
-              maxHeight: '380px',
+              maxHeight: '420px',
               overflowY: 'auto',
               padding: '0.5rem'
             }}
@@ -259,9 +308,342 @@ export const NotificationCenter = () => {
               </div>
             ) : (
               notifications.map((item) => {
+                const isProcessing = processingId === item.id || processingId === item.targetUserId;
+
+                // ── Case A: Shift Swap Request ──
+                if (item.type === 'SHIFT_SWAP_REQUEST') {
+                  const isRecipient = item.recipientUid === myUid;
+                  const isRequester = item.requesterUid === myUid;
+                  const isPending = item.status === 'pending';
+                  const isApproved = item.status === 'approved';
+                  const isRejected = item.status === 'rejected';
+
+                  const requesterSingle = item.requesterSingleName || formatSingleName(item.requesterName);
+                  const recipientSingle = item.recipientSingleName || formatSingleName(item.recipientName);
+
+                  const preferDateText = formatFriendlyDate(item.targetShiftDate);
+                  const scheduleDateText = formatFriendlyDate(item.requesterShiftDate);
+
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        background: isPending && isRecipient
+                          ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(15, 23, 42, 0.8) 100%)'
+                          : 'rgba(255, 255, 255, 0.02)',
+                        border: isPending && isRecipient
+                          ? '1px solid rgba(245, 158, 11, 0.4)'
+                          : '1px solid rgba(255, 255, 255, 0.06)',
+                        borderRadius: '12px',
+                        padding: '0.75rem 0.85rem',
+                        marginBottom: '0.5rem',
+                        transition: 'all 0.15s ease',
+                        boxShadow: isPending && isRecipient ? '0 4px 16px rgba(245, 158, 11, 0.15)' : 'none'
+                      }}
+                    >
+                      {/* Top Row: Requester Avatar + Header + Relative Time */}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                        <div style={{ position: 'relative', flexShrink: 0 }}>
+                          <UserAvatar
+                            photoURL={isRecipient ? item.requesterPhotoURL : item.recipientPhotoURL}
+                            displayName={isRecipient ? item.requesterName : item.recipientName}
+                            size={36}
+                          />
+                          <div
+                            style={{
+                              position: 'absolute',
+                              bottom: -2,
+                              right: -2,
+                              background: '#F59E0B',
+                              color: '#0F172A',
+                              borderRadius: '50%',
+                              width: 15,
+                              height: 15,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1.5px solid #080E1E'
+                            }}
+                          >
+                            <ArrowLeftRight size={9} strokeWidth={2.5} />
+                          </div>
+                        </div>
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.3rem' }}>
+                            <span
+                              style={{
+                                fontWeight: 800,
+                                fontSize: '0.84rem',
+                                color: '#FFFFFF',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}
+                            >
+                              {isRecipient ? requesterSingle : recipientSingle}
+                            </span>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                              {formatTime(item.createdAt)}
+                            </span>
+                          </div>
+
+                          {/* Correct and Compact Notification Text */}
+                          <div
+                            style={{
+                              fontSize: '0.78rem',
+                              color: '#E2E8F0',
+                              marginTop: '3px',
+                              lineHeight: 1.35
+                            }}
+                          >
+                            {isRecipient ? (
+                              <>
+                                <strong style={{ color: 'var(--accent-gold)' }}>{requesterSingle}</strong> wants to work on{' '}
+                                <strong style={{ color: '#38BDF8' }}>{preferDateText}</strong>, and let you work on{' '}
+                                <strong style={{ color: '#34D399' }}>{scheduleDateText}</strong>.
+                              </>
+                            ) : (
+                              <>
+                                You asked <strong style={{ color: 'var(--accent-gold)' }}>{recipientSingle}</strong> to work on{' '}
+                                <strong style={{ color: '#38BDF8' }}>{preferDateText}</strong>, and take your shift on{' '}
+                                <strong style={{ color: '#34D399' }}>{scheduleDateText}</strong>.
+                              </>
+                            )}
+                          </div>
+
+                          {/* Shift Comparison Badges */}
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.3rem',
+                              marginTop: '6px',
+                              fontSize: '0.67rem',
+                              flexWrap: 'wrap'
+                            }}
+                          >
+                            <span
+                              style={{
+                                background: 'rgba(52, 211, 153, 0.12)',
+                                border: '1px solid rgba(52, 211, 153, 0.3)',
+                                color: '#34D399',
+                                padding: '2px 6px',
+                                borderRadius: '6px',
+                                fontWeight: 700
+                              }}
+                            >
+                              📍 {item.requesterShiftBranch} • {scheduleDateText}
+                            </span>
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 800 }}>⇄</span>
+                            <span
+                              style={{
+                                background: 'rgba(56, 189, 248, 0.12)',
+                                border: '1px solid rgba(56, 189, 248, 0.3)',
+                                color: '#38BDF8',
+                                padding: '2px 6px',
+                                borderRadius: '6px',
+                                fontWeight: 700
+                              }}
+                            >
+                              📍 {item.targetShiftBranch} • {preferDateText}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action Row */}
+                      <div style={{ marginTop: '0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.45rem' }}>
+                        {isRecipient && isPending ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={isProcessing}
+                              onClick={(e) => onRejectSwap(item, e)}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.12)',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                                color: '#F87171',
+                                padding: '0.35rem 0.75rem',
+                                borderRadius: '8px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <XCircle size={13} />
+                              <span>Reject</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isProcessing}
+                              onClick={(e) => onApproveSwap(item, e)}
+                              style={{
+                                background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                                border: 'none',
+                                color: '#FFFFFF',
+                                padding: '0.35rem 0.85rem',
+                                borderRadius: '8px',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <CheckCircle2 size={13} />
+                              <span>{isProcessing ? 'Processing…' : 'Approve'}</span>
+                            </button>
+                          </>
+                        ) : isRequester && isPending ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                color: 'var(--accent-gold)'
+                              }}
+                            >
+                              <Clock size={12} /> Waiting for {recipientSingle}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={isProcessing}
+                              onClick={(e) => onCancelSwap(item, e)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#F87171',
+                                cursor: 'pointer',
+                                fontSize: '0.68rem',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.2rem'
+                              }}
+                            >
+                              <Trash2 size={11} /> Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                color: isApproved ? 'var(--success)' : '#F87171'
+                              }}
+                            >
+                              {isApproved ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                              {isApproved ? 'Schedule Exchanged' : 'Exchange Rejected'}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => dismissNotification(item.id)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-subtle)',
+                                cursor: 'pointer',
+                                fontSize: '0.65rem'
+                              }}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // ── Case B: Shift Swap Resolved ──
+                if (item.type === 'SHIFT_SWAP_RESOLVED') {
+                  const isApproved = item.status === 'approved';
+                  const actorSingle = item.actorSingleName || formatSingleName(item.actorName);
+                  const preferDateText = formatFriendlyDate(item.targetShiftDate);
+
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        background: isApproved ? 'rgba(52, 211, 153, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                        border: isApproved ? '1px solid rgba(52, 211, 153, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                        borderRadius: '12px',
+                        padding: '0.75rem 0.85rem',
+                        marginBottom: '0.5rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                        <UserAvatar
+                          photoURL={item.actorPhotoURL}
+                          displayName={item.actorName}
+                          size={34}
+                        />
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.3rem' }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.84rem', color: '#FFFFFF' }}>
+                              {item.title || 'Schedule Exchange Update'}
+                            </span>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                              {formatTime(item.createdAt)}
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: '0.76rem', color: '#E2E8F0', marginTop: '3px', lineHeight: 1.35 }}>
+                            {isApproved ? (
+                              <>
+                                <strong style={{ color: 'var(--accent-gold)' }}>{actorSingle}</strong> approved your exchange:{' '}
+                                you are now scheduled on <strong style={{ color: '#34D399' }}>{preferDateText}</strong>.
+                              </>
+                            ) : (
+                              <>
+                                <strong style={{ color: 'var(--accent-gold)' }}>{actorSingle}</strong> declined your schedule exchange request for{' '}
+                                <strong style={{ color: '#F87171' }}>{preferDateText}</strong>.
+                              </>
+                            )}
+                          </div>
+
+                          <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              onClick={() => dismissNotification(item.id)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-subtle)',
+                                cursor: 'pointer',
+                                fontSize: '0.65rem'
+                              }}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // ── Case C: New User Pending Approval (Manager) ──
                 const isPending = item.status === 'pending';
                 const isAuthorized = item.status === 'authorized';
-                const isProcessing = processingId === item.targetUserId;
 
                 return (
                   <div
@@ -339,7 +721,7 @@ export const NotificationCenter = () => {
                           <button
                             type="button"
                             disabled={isProcessing}
-                            onClick={(e) => onReject(item.targetUserId, item.id, e)}
+                            onClick={(e) => onRejectUser(item.targetUserId, item.id, e)}
                             style={{
                               background: 'rgba(239, 68, 68, 0.12)',
                               border: '1px solid rgba(239, 68, 68, 0.3)',
@@ -362,7 +744,7 @@ export const NotificationCenter = () => {
                           <button
                             type="button"
                             disabled={isProcessing}
-                            onClick={(e) => onApprove(item.targetUserId, item.id, e)}
+                            onClick={(e) => onApproveUser(item.targetUserId, item.id, e)}
                             style={{
                               background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
                               border: 'none',
