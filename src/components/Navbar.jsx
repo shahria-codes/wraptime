@@ -187,7 +187,7 @@ export const Navbar = ({ selectedBranch, setSelectedBranch }) => {
 
           {/* Right Header: Notifications + User Profile */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
-            {isManager && <NotificationCenter />}
+            {userProfile && <NotificationCenter />}
 
             {userProfile && (
               <div

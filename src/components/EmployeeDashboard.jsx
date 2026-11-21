@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext';
 import { db, collection, doc, setDoc, updateDoc, onSnapshot } from '../firebase';
 import { useBranches } from '../context/BranchContext';
 import { UserAvatar } from './UserAvatar';
+import { ShiftSwapModal } from './ShiftSwapModal';
 import { 
   Clock, 
   Users, 
@@ -21,7 +22,8 @@ import {
   LogOut,
   Timer,
   Check,
-  X
+  X,
+  ArrowLeftRight
 } from 'lucide-react';
 import { 
   format, 
@@ -62,6 +64,15 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Shift Swap Modal state
+  const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
+  const [swapInitialShift, setSwapInitialShift] = useState(null);
+
+  const openSwapModal = (shift) => {
+    setSwapInitialShift(shift);
+    setIsSwapModalOpen(true);
+  };
 
   // Check-In Modal state
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
@@ -1339,6 +1350,48 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                         </div>
                       )}
 
+                      {/* ── Shift Swap Button (upcoming, not active/completed/expired) ── */}
+                      {!isShiftActive && !isShiftCompleted && !isExpired && (
+                        <div style={{
+                          marginTop: '0.75rem',
+                          paddingTop: '0.65rem',
+                          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'flex-end'
+                        }}>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); openSwapModal(shift); }}
+                            title="Request to exchange this shift with a colleague"
+                            style={{
+                              background: 'rgba(56, 189, 248, 0.1)',
+                              border: '1px solid rgba(56, 189, 248, 0.3)',
+                              color: '#38BDF8',
+                              padding: '0.3rem 0.75rem',
+                              borderRadius: '8px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.3rem',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(56, 189, 248, 0.2)';
+                              e.currentTarget.style.borderColor = '#38BDF8';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(56, 189, 248, 0.1)';
+                              e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.3)';
+                            }}
+                          >
+                            <ArrowLeftRight size={13} /> Swap Shift
+                          </button>
+                        </div>
+                      )}
+
                       {/* ── Check-In / Check-Out Actions on Today's Card ── */}
                       {isToday && (
                         <div style={{
@@ -2180,6 +2233,16 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
         </div>,
         document.body
       )}
+
+      {/* ── Shift Swap Modal ── */}
+      <ShiftSwapModal
+        isOpen={isSwapModalOpen}
+        onClose={() => { setIsSwapModalOpen(false); setSwapInitialShift(null); }}
+        initialShift={swapInitialShift}
+        myUpcomingShifts={upcomingShifts}
+        allShifts={shifts}
+        employees={allEmployees}
+      />
 
     </div>
   );
