@@ -46,14 +46,34 @@ const EmployeeCard = ({ user, isSelf, shifts, onStatus, onBranch, navigate }) =>
 
   /* Working stats */
   const getHours = s => {
-    if (s.actualHours !== undefined && s.actualHours !== null && s.actualHours !== '')
-      return parseFloat(s.actualHours) || 0;
+    if (s.actualHours !== undefined && s.actualHours !== null && s.actualHours !== '') {
+      const parsed = parseFloat(s.actualHours);
+      if (parsed > 0) return parsed;
+    }
+    // If checked in and checked out, calculate actual worked time
+    if (s.checkInTime && s.checkOutTime) {
+      const [sH, sM] = s.checkInTime.split(':').map(Number);
+      const [eH, eM] = s.checkOutTime.split(':').map(Number);
+      let gross = (eH * 60 + eM) - (sH * 60 + sM);
+      if (gross < 0) gross += 1440;
+      let brk = Number(s.breakMinutes) || 0;
+      if (gross < 240) brk = 0; // Less than 4 hours, do not deduct break
+      return Math.max(0, (gross - brk) / 60);
+    }
+    // If currently checked in, calculate elapsed time
+    if (s.checkInTime && !s.checkOutTime) {
+      const [sH, sM] = s.checkInTime.split(':').map(Number);
+      const now = new Date();
+      let gross = (now.getHours() * 60 + now.getMinutes()) - (sH * 60 + sM);
+      if (gross < 0) gross += 1440;
+      return Math.max(0, gross / 60);
+    }
     const [sH, sM] = (s.startTime || '09:00').split(':').map(Number);
     const [eH, eM] = (s.endTime   || '22:00').split(':').map(Number);
     let gross = (eH * 60 + eM) - (sH * 60 + sM);
     if (gross < 0) gross += 1440;
     const gh = gross / 60;
-    let brk = gh >= 8 ? 60 : 30;
+    let brk = gh >= 8 ? 60 : (gh >= 4 ? 30 : 0);
     if (s.breakMinutes !== undefined && s.breakMinutes !== null && s.breakMinutes !== '') {
       const b = Number(s.breakMinutes);
       if (!isNaN(b) && b >= 0) brk = b;
@@ -193,7 +213,9 @@ const EmployeeCard = ({ user, isSelf, shifts, onStatus, onBranch, navigate }) =>
             <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '1px' }}>Days</div>
           </div>
           <div style={{ flex: 1, textAlign: 'center', padding: '0.5rem 0.25rem' }}>
-            <div style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-gold)', lineHeight: 1.1 }}>{totalHours.toFixed(0)}</div>
+            <div style={{ fontFamily: 'var(--font-heading)', fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-gold)', lineHeight: 1.1 }}>
+              {totalHours > 0 ? (totalHours % 1 === 0 ? totalHours.toFixed(0) : totalHours.toFixed(1)) + 'h' : '0h'}
+            </div>
             <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '1px' }}>Hours</div>
           </div>
         </div>
@@ -286,8 +308,8 @@ const EmployeeCard = ({ user, isSelf, shifts, onStatus, onBranch, navigate }) =>
           <ExternalLink size={12} /> Profile
         </button>
 
-        {/* Action */}
-        {isSelf ? (
+        {/* Action: Self and all managers are protected from revocation */}
+        {isSelf || isManager ? (
           <div style={{ flex:2, display:'flex', alignItems:'center', justifyContent:'center', gap:'0.3rem', padding:'0.6rem', fontSize:'0.72rem', color:'var(--text-subtle)', fontFamily:'var(--font-body)' }}>
             <Lock size={11} color="var(--primary)" /> Protected
           </div>
@@ -343,6 +365,11 @@ export const EmployeeManager = () => {
   }, []);
 
   const updateUserStatus = async (uid, status) => {
+    const targetUser = users.find(u => (u.uid || u.id) === uid);
+    if (targetUser?.role === 'manager' && status !== 'authorized') {
+      showAlert("Managers cannot be revoked or removed.", "Security Protection", "warning");
+      return;
+    }
     if (uid === currentUserProfile?.uid && status !== 'authorized') {
       showAlert("Managers cannot revoke their own access.", "Security Protection", "warning");
       return;
@@ -363,6 +390,30 @@ export const EmployeeManager = () => {
     if (filterTab === 'MANAGERS')   return u.role   === 'manager';
     if (filterTab === 'AUTHORIZED') return u.status === 'authorized';
     return true;
+  });
+
+  // Sort so Managers appear first before employees, with Jakaria first among managers
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
+    const aIsManager = a.role === 'manager';
+    const bIsManager = b.role === 'manager';
+
+    // 1. Managers show first
+    if (aIsManager && !bIsManager) return -1;
+    if (!aIsManager && bIsManager) return 1;
+
+    // Among managers: Jakaria first, then other managers
+    if (aIsManager && bIsManager) {
+      const aName = (a.displayName || '').toLowerCase();
+      const bName = (b.displayName || '').toLowerCase();
+      const aIsJakaria = aName.includes('jakaria');
+      const bIsJakaria = bName.includes('jakaria');
+      if (aIsJakaria && !bIsJakaria) return -1;
+      if (!aIsJakaria && bIsJakaria) return 1;
+      return (a.displayName || '').localeCompare(b.displayName || '');
+    }
+
+    // Among regular staff: alphabetical
+    return (a.displayName || '').localeCompare(b.displayName || '');
   });
 
   /* ── Tab config ── */
@@ -437,13 +488,13 @@ export const EmployeeManager = () => {
         <div style={{ textAlign:'center', padding:'4rem', color:'var(--text-muted)', fontFamily:'var(--font-body)' }}>
           Loading staff records…
         </div>
-      ) : filteredUsers.length === 0 ? (
+      ) : sortedUsers.length === 0 ? (
         <div className="glass-panel" style={{ textAlign:'center', padding:'3rem' }}>
           <p style={{ color:'var(--text-muted)', fontFamily:'var(--font-body)', margin:0 }}>No employees match the selected filter.</p>
         </div>
       ) : (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:'1rem' }}>
-          {filteredUsers.map(user => {
+          {sortedUsers.map(user => {
             const uid   = user.uid || user.id;
             const isSelf = uid === currentUserProfile?.uid;
             return (

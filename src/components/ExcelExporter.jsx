@@ -127,7 +127,18 @@ export const ExcelExporter = ({ selectedBranch }) => {
   // Helper to compute worked hours for a single shift
   const getShiftWorkedHours = (s) => {
     if (s.actualHours !== undefined && s.actualHours !== null && s.actualHours !== '') {
-      return parseFloat(s.actualHours);
+      const parsed = parseFloat(s.actualHours);
+      if (parsed > 0) return parsed;
+    }
+    // If checked in and checked out, calculate actual elapsed time
+    if (s.checkInTime && s.checkOutTime) {
+      const [sH, sM] = s.checkInTime.split(':').map(Number);
+      const [eH, eM] = s.checkOutTime.split(':').map(Number);
+      let grossMinutes = (eH * 60 + eM) - (sH * 60 + sM);
+      if (grossMinutes < 0) grossMinutes += 24 * 60;
+      let breakMins = Number(s.breakMinutes) || 0;
+      if (grossMinutes < 240) breakMins = 0; // Less than 4 hours, do not deduct break
+      return Math.max(0, (grossMinutes - breakMins) / 60);
     }
     const [sH, sM] = (s.startTime || '09:00').split(':').map(Number);
     const [eH, eM] = (s.endTime || '22:00').split(':').map(Number);
@@ -135,7 +146,7 @@ export const ExcelExporter = ({ selectedBranch }) => {
     if (grossMinutes < 0) grossMinutes += 24 * 60;
     const grossHours = grossMinutes / 60;
 
-    let breakMins = grossHours >= 8 ? 60 : 30;
+    let breakMins = grossHours >= 8 ? 60 : (grossHours >= 4 ? 30 : 0);
     if (s.breakMinutes !== undefined && s.breakMinutes !== null && s.breakMinutes !== '') {
       const b = Number(s.breakMinutes);
       if (!isNaN(b) && b >= 0) breakMins = b;

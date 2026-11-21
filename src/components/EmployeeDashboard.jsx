@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ChevronDown,
   CheckCircle2,
+  XCircle,
   MapPin,
   Sparkles,
   CalendarDays,
@@ -123,7 +124,8 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
     const [eH, eM] = endTimeStr.split(':').map(Number);
     let grossMinutes = (eH * 60 + eM) - (sH * 60 + sM);
     if (grossMinutes < 0) grossMinutes += 24 * 60;
-    const netMinutes = Math.max(0, grossMinutes - breakMinutes);
+    const effectiveBreak = grossMinutes < 240 ? 0 : breakMinutes;
+    const netMinutes = Math.max(0, grossMinutes - effectiveBreak);
     return parseFloat((netMinutes / 60).toFixed(2));
   };
 
@@ -149,15 +151,35 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayStr = useMemo(() => format(today, 'yyyy-MM-dd'), [today]);
 
+  // Helper: check if a shift's scheduled time window has already ended without check-in
+  const isShiftTimeExpired = (shift, now = currentTime) => {
+    if (!shift || !shift.date) return false;
+    const todayStrNow = format(now, 'yyyy-MM-dd');
+    if (shift.date < todayStrNow) return true;
+    if (shift.date === todayStrNow) {
+      if (shift.status === 'checked-in') return false; // currently working
+      if (shift.status === 'completed' || (shift.checkInTime && shift.checkOutTime)) return false;
+      const nowTimeStr = format(now, 'HH:mm');
+      const endTime = shift.endTime || '22:00';
+      return nowTimeStr >= endTime;
+    }
+    return false;
+  };
+
   // Active shift currently clocked in
   const activeShift = useMemo(() => {
     return myShifts.find(s => s.status === 'checked-in' || (s.checkInTimestamp && !s.checkOutTimestamp && s.date === todayStr));
   }, [myShifts, todayStr]);
 
-  // Today's scheduled shift (if any, pending and not completed)
+  // Today's scheduled shift (if any, pending, not completed, and not expired)
   const todaysShift = useMemo(() => {
-    return myShifts.find(s => s.date === todayStr && s.status !== 'completed' && s.status !== 'checked-in');
-  }, [myShifts, todayStr]);
+    return myShifts.find(s => s.date === todayStr && s.status !== 'completed' && s.status !== 'checked-in' && !isShiftTimeExpired(s, currentTime));
+  }, [myShifts, todayStr, currentTime]);
+
+  // Today's shift that ended without attendance
+  const todaysExpiredShift = useMemo(() => {
+    return myShifts.find(s => s.date === todayStr && s.status !== 'completed' && s.status !== 'checked-in' && isShiftTimeExpired(s, currentTime));
+  }, [myShifts, todayStr, currentTime]);
 
   // Today's completed shifts (if any)
   const todaysCompletedShifts = useMemo(() => {
@@ -207,12 +229,27 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
   }, [myShifts]);
 
   const upcomingShifts = useMemo(() => {
-    return sortedMyShifts.filter(s => s.status !== 'completed' && s.date >= todayStr);
-  }, [sortedMyShifts, todayStr]);
+    return sortedMyShifts.filter(s => {
+      if (s.status === 'completed' || (s.checkInTime && s.checkOutTime)) return false;
+      if (s.date > todayStr) return true;
+      if (s.date === todayStr) {
+        if (s.status === 'checked-in') return true;
+        return !isShiftTimeExpired(s, currentTime);
+      }
+      return false;
+    });
+  }, [sortedMyShifts, todayStr, currentTime]);
 
   const pastShifts = useMemo(() => {
-    return sortedMyShifts.filter(s => s.status === 'completed' || s.date < todayStr).reverse();
-  }, [sortedMyShifts, todayStr]);
+    return sortedMyShifts.filter(s => {
+      if (s.status === 'completed' || (s.checkInTime && s.checkOutTime) || s.date < todayStr) return true;
+      if (s.date === todayStr) {
+        if (s.status === 'checked-in') return false;
+        return isShiftTimeExpired(s, currentTime);
+      }
+      return false;
+    }).reverse();
+  }, [sortedMyShifts, todayStr, currentTime]);
 
   const displayedShifts = useMemo(() => {
     let list = sortedMyShifts;
@@ -249,6 +286,10 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
   // ── Open Check-In Modal ──
   const openCheckInModal = (shift = null) => {
     const shiftToUse = shift || todaysShift || null;
+    if (shiftToUse && isShiftTimeExpired(shiftToUse, new Date())) {
+      showAlert(`This shift ended at ${shiftToUse.endTime || '22:00'}. Check-in is closed.`, 'Check-In Closed', 'warning');
+      return;
+    }
     setTargetShiftForCheckIn(shiftToUse);
     const initialBranch = shiftToUse?.branch || (selectedBranch !== 'ALL' ? selectedBranch : userProfile?.branch || branchNames[0] || '');
     setCheckInBranch(initialBranch);
@@ -679,6 +720,10 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                     <span style={{ color: '#34D399', fontWeight: 700 }}>
                       ✓ Shift completed for today ({todaysCompletedShifts[0].checkInTime || todaysCompletedShifts[0].startTime} - {todaysCompletedShifts[0].checkOutTime || todaysCompletedShifts[0].endTime})
                     </span>
+                  ) : todaysExpiredShift ? (
+                    <span style={{ color: '#F87171', fontWeight: 600 }}>
+                      Shift ended at <strong style={{ color: 'var(--accent-gold)' }}>{todaysExpiredShift.branch}</strong> ({todaysExpiredShift.startTime} - {todaysExpiredShift.endTime}) • Not checked in
+                    </span>
                   ) : (
                     <span>No scheduled shift for today.</span>
                   )}
@@ -728,6 +773,22 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                 <LogIn size={17} />
                 Check In ({todaysShift.branch})
               </button>
+            ) : todaysExpiredShift ? (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.28)',
+                color: '#F87171',
+                padding: '0.55rem 1rem',
+                borderRadius: '12px',
+                fontWeight: 700,
+                fontSize: '0.82rem'
+              }}>
+                <Clock size={15} />
+                <span>Shift Ended • Check-In Closed</span>
+              </div>
             ) : (
               <button
                 type="button"
@@ -914,6 +975,7 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
 
                   const isShiftActive = shift.status === 'checked-in' || (shift.checkInTimestamp && !shift.checkOutTimestamp && isToday);
                   const isShiftCompleted = shift.status === 'completed' || (shift.checkInTime && shift.checkOutTime);
+                  const isExpired = isShiftTimeExpired(shift, currentTime);
 
                   // Find coworkers scheduled on this same date and branch
                   const coworkers = shifts.filter(s => 
@@ -935,24 +997,28 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                         cursor: 'default',
                         background: isShiftActive
                           ? 'linear-gradient(145deg, rgba(52, 211, 153, 0.12) 0%, rgba(15, 23, 42, 0.88) 100%)'
-                          : isToday 
-                            ? 'linear-gradient(145deg, rgba(245, 158, 11, 0.12) 0%, rgba(15, 23, 42, 0.88) 100%)' 
-                            : isPast 
-                              ? 'linear-gradient(145deg, rgba(255, 255, 255, 0.03) 0%, rgba(15, 23, 42, 0.65) 100%)'
-                              : 'linear-gradient(145deg, rgba(255, 255, 255, 0.06) 0%, rgba(15, 23, 42, 0.75) 100%)',
+                          : isExpired
+                            ? 'linear-gradient(145deg, rgba(255, 255, 255, 0.03) 0%, rgba(15, 23, 42, 0.65) 100%)'
+                            : isToday 
+                              ? 'linear-gradient(145deg, rgba(245, 158, 11, 0.12) 0%, rgba(15, 23, 42, 0.88) 100%)' 
+                              : isPast 
+                                ? 'linear-gradient(145deg, rgba(255, 255, 255, 0.03) 0%, rgba(15, 23, 42, 0.65) 100%)'
+                                : 'linear-gradient(145deg, rgba(255, 255, 255, 0.06) 0%, rgba(15, 23, 42, 0.75) 100%)',
                         border: isShiftActive
                           ? '1px solid rgba(52, 211, 153, 0.55)'
-                          : isToday 
-                            ? '1px solid rgba(245, 158, 11, 0.55)' 
-                            : isPast 
-                              ? '1px solid rgba(255, 255, 255, 0.07)'
-                              : '1px solid rgba(255, 255, 255, 0.12)',
+                          : isExpired
+                            ? '1px solid rgba(239, 68, 68, 0.25)'
+                            : isToday 
+                              ? '1px solid rgba(245, 158, 11, 0.55)' 
+                              : isPast 
+                                ? '1px solid rgba(255, 255, 255, 0.07)'
+                                : '1px solid rgba(255, 255, 255, 0.12)',
                         boxShadow: isShiftActive
                           ? '0 12px 35px -8px rgba(52, 211, 153, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-                          : isToday 
+                          : isToday && !isExpired
                             ? '0 12px 35px -8px rgba(245, 158, 11, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2)' 
                             : '0 8px 24px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
-                        opacity: isPast ? 0.78 : 1
+                        opacity: (isPast || isExpired) ? 0.78 : 1
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'translateY(-3px)';
@@ -1079,6 +1145,21 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                               fontWeight: 700
                             }}>
                               <CheckCircle2 size={11} /> Completed
+                            </span>
+                          ) : isExpired ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.3rem',
+                              background: 'rgba(239, 68, 68, 0.12)',
+                              border: '1px solid rgba(239, 68, 68, 0.35)',
+                              color: '#F87171',
+                              padding: '0.25rem 0.65rem',
+                              borderRadius: '999px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700
+                            }}>
+                              <Clock size={11} /> Shift Ended
                             </span>
                           ) : isToday ? (
                             <span style={{
@@ -1304,6 +1385,23 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                               </span>
                               <span>
                                 In: <strong style={{ color: '#FFF' }}>{shift.checkInTime || shift.startTime}</strong> • Out: <strong style={{ color: '#FFF' }}>{shift.checkOutTime || shift.endTime}</strong> ({shift.actualHours || hrs}h)
+                              </span>
+                            </div>
+                          ) : isExpired ? (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#F87171', fontWeight: 600 }}>
+                                <XCircle size={13} /> Shift ended ({shift.startTime} - {shift.endTime}) • Not checked in
+                              </span>
+                              <span style={{
+                                padding: '0.35rem 0.75rem',
+                                borderRadius: '8px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                background: 'rgba(255, 255, 255, 0.05)',
+                                color: 'var(--text-muted)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)'
+                              }}>
+                                Ended
                               </span>
                             </div>
                           ) : (

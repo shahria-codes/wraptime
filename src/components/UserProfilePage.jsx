@@ -400,13 +400,34 @@ export const UserProfilePage = () => {
 
   /* Shift stats */
   const getWorkedHours = (s) => {
-    if (s.actualHours != null && s.actualHours !== '') return parseFloat(s.actualHours) || 0;
+    if (s.actualHours != null && s.actualHours !== '') {
+      const parsed = parseFloat(s.actualHours);
+      if (parsed > 0) return parsed;
+    }
+    // If checked in and checked out, calculate actual elapsed time
+    if (s.checkInTime && s.checkOutTime) {
+      const [sH, sM] = s.checkInTime.split(':').map(Number);
+      const [eH, eM] = s.checkOutTime.split(':').map(Number);
+      let gross = (eH * 60 + eM) - (sH * 60 + sM);
+      if (gross < 0) gross += 1440;
+      let brk = Number(s.breakMinutes) || 0;
+      if (gross < 240) brk = 0; // Under 4 hours, do not deduct break
+      return Math.max(0, (gross - brk) / 60);
+    }
+    // If currently checked in, calculate elapsed time
+    if (s.checkInTime && !s.checkOutTime) {
+      const [sH, sM] = s.checkInTime.split(':').map(Number);
+      const now = new Date();
+      let gross = (now.getHours() * 60 + now.getMinutes()) - (sH * 60 + sM);
+      if (gross < 0) gross += 1440;
+      return Math.max(0, gross / 60);
+    }
     const [sH, sM] = (s.startTime || '09:00').split(':').map(Number);
     const [eH, eM] = (s.endTime || '22:00').split(':').map(Number);
     let gross = (eH * 60 + eM) - (sH * 60 + sM);
     if (gross < 0) gross += 1440;
     const hrs = gross / 60;
-    let brk = hrs >= 8 ? 60 : 30;
+    let brk = hrs >= 8 ? 60 : (hrs >= 4 ? 30 : 0);
     if (s.breakMinutes != null && s.breakMinutes !== '') {
       const b = Number(s.breakMinutes);
       if (!isNaN(b) && b >= 0) brk = b;
