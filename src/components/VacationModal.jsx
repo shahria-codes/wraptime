@@ -48,8 +48,8 @@ export const VacationModal = ({ isOpen, onClose }) => {
 
   const [shifts, setShifts] = useState([]);
   const [branch, setBranch] = useState(defaultUserBranch);
-  const [startDate, setStartDate] = useState(tomorrowStr);
-  const [endDate, setEndDate] = useState(tomorrowStr);
+  const [startDate, setStartDate] = useState(firstDayNextMonth);
+  const [endDate, setEndDate] = useState(firstDayNextMonth);
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [myVacations, setMyVacations] = useState([]);
@@ -84,14 +84,15 @@ export const VacationModal = ({ isOpen, onClose }) => {
   }, [shifts, nextMonthStr, branch]);
 
   // Minimum allowed date:
-  // If manager already started scheduling next month, next month is locked -> earliest allowed is month after next.
-  // If not, next month is open for vacation requests -> earliest allowed is tomorrowStr (or firstDayNextMonth).
+  // Vacation requests cannot be made for the current month (current schedule is active).
+  // - If manager already started scheduling next month -> earliest allowed is month after next (firstDayAfterNextMonth).
+  // - If manager has not started next month schedule yet -> earliest allowed is first day of next month (firstDayNextMonth).
   const minAllowedStartDate = useMemo(() => {
     if (isNextMonthScheduled) {
       return firstDayAfterNextMonth;
     }
-    return tomorrowStr;
-  }, [isNextMonthScheduled, firstDayAfterNextMonth, tomorrowStr]);
+    return firstDayNextMonth;
+  }, [isNextMonthScheduled, firstDayAfterNextMonth, firstDayNextMonth]);
 
   // Auto-align dates when branch or scheduling status changes
   useEffect(() => {
@@ -101,12 +102,12 @@ export const VacationModal = ({ isOpen, onClose }) => {
         setEndDate(firstDayAfterNextMonth);
       }
     } else {
-      if (!startDate || startDate < tomorrowStr) {
-        setStartDate(tomorrowStr);
-        setEndDate(tomorrowStr);
+      if (!startDate || startDate < firstDayNextMonth) {
+        setStartDate(firstDayNextMonth);
+        setEndDate(firstDayNextMonth);
       }
     }
-  }, [isNextMonthScheduled, firstDayAfterNextMonth, tomorrowStr]);
+  }, [isNextMonthScheduled, firstDayAfterNextMonth, firstDayNextMonth]);
 
   // Listen to my own vacation requests in real time
   useEffect(() => {
@@ -148,6 +149,16 @@ export const VacationModal = ({ isOpen, onClose }) => {
 
     if (endDate < startDate) {
       showAlert('End date cannot be earlier than start date.', 'Invalid Dates', 'warning');
+      return;
+    }
+
+    // Current month restriction:
+    if (startDate < firstDayNextMonth) {
+      showAlert(
+        `Vacation requests cannot be submitted for the current month (${format(new Date(), 'MMMM yyyy')}). You can only request vacation starting from ${nextMonthName} (${firstDayNextMonth}) onwards.`,
+        'Current Month Restricted',
+        'warning'
+      );
       return;
     }
 
