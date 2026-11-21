@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { db, collection, doc, updateDoc, setDoc, deleteDoc, onSnapshot, query, orderBy } from '../firebase';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
@@ -17,6 +17,43 @@ export const formatSingleName = (displayName) => {
   return parts[1] || first || 'Staff';
 };
 
+// ── Device push helper ──────────────────────────────────────────
+// Shows a native OS/browser notification via the Service Worker
+// (PWA-compatible) with a plain Notification API fallback.
+const pushDeviceNotif = async (title, body, icon = '/pwa-192x192.png') => {
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(title, {
+        body,
+        icon,
+        badge: '/pwa-192x192.png',
+        tag: title,          // collapses duplicate notifications
+        renotify: false,
+        silent: false
+      });
+    } else {
+      new Notification(title, { body, icon });
+    }
+  } catch (err) {
+    // SW may not support showNotification in some browsers — fall back
+    try { new Notification(title, { body, icon }); } catch (_) {}
+  }
+};
+
+// ── Permission request helper ──────────────────────────────────
+// Called once after sign-in. Resolves silently if already decided.
+export const requestNotificationPermission = async () => {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'granted') return 'granted';
+  if (Notification.permission === 'denied') return 'denied';
+  const result = await Notification.requestPermission();
+  return result;
+};
+
 const NotificationContext = createContext(null);
 
 export const NotificationProvider = ({ children }) => {
@@ -28,6 +65,16 @@ export const NotificationProvider = ({ children }) => {
   const [rawNotifications, setRawNotifications] = useState([]);
   const [pendingUsers, setPendingUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Track IDs we've already shown a device notification for.
+  // Using a ref so it survives re-renders without causing them.
+  const seenIdsRef = useRef(null); // null = initial load (don't fire burst)
+
+  // ── Request device notification permission once after sign-in ──
+  useEffect(() => {
+    if (!myUid) return;
+    requestNotificationPermission().catch(() => {});
+  }, [myUid]);
 
   // 1. Listen to 'notifications' collection in real time
   useEffect(() => {
@@ -61,6 +108,50 @@ export const NotificationProvider = ({ children }) => {
         });
       }
 
+      // ── Device notification for newly arrived items ──
+      // On first snapshot we just seed the seen-set without pushing anything
+      // (avoids a burst of old notifications on page load).
+      if (seenIdsRef.current === null) {
+        seenIdsRef.current = new Set(list.map(n => n.id));
+      } else {
+        list.forEach(n => {
+          if (seenIdsRef.current.has(n.id)) return; // already seen
+          seenIdsRef.current.add(n.id);
+
+          // Only push device notification for items addressed to ME
+          const isForMe =
+            n.recipientUid === myUid ||
+            n.targetUserId === myUid ||
+            (isManager && n.type === 'NEW_USER_PENDING' && n.status === 'pending');
+
+          if (!isForMe) return;
+
+          // Build human-readable title + body per type
+          let title = 'WrapTime';
+          let body  = 'You have a new notification.';
+
+          if (n.type === 'SHIFT_SWAP_REQUEST') {
+            const who = n.requesterSingleName || formatSingleName(n.requesterName) || 'A colleague';
+            title = '⇄ Schedule Exchange Request';
+            body  = `${who} wants to swap shifts with you.`;
+          } else if (n.type === 'SHIFT_SWAP_RESOLVED') {
+            const who = n.actorSingleName || formatSingleName(n.actorName) || 'Your colleague';
+            title = n.status === 'approved'
+              ? '✅ Exchange Approved'
+              : '❌ Exchange Declined';
+            body = n.status === 'approved'
+              ? `${who} approved your schedule exchange.`
+              : `${who} declined your schedule exchange request.`;
+          } else if (n.type === 'NEW_USER_PENDING') {
+            const who = n.userName || 'A new employee';
+            title = '👤 New Staff Registration';
+            body  = `${who} is waiting for your approval.`;
+          }
+
+          pushDeviceNotif(title, body);
+        });
+      }
+
       setRawNotifications(list);
       setLoading(false);
     }, (err) => {
@@ -88,6 +179,8 @@ export const NotificationProvider = ({ children }) => {
     return () => {
       unsubNotifs();
       unsubUsers();
+      // Reset seen-IDs on unmount (user logout / uid change)
+      seenIdsRef.current = null;
     };
   }, [myUid, isManager]);
 
