@@ -319,6 +319,16 @@ export const ExcelExporter = ({ selectedBranch }) => {
             </div>
           </div>
 
+          {/* Summary & Note Bar (Before Branch Tables / Cards) */}
+          <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              Note: <span style={{ color: 'var(--success)', fontWeight: 800 }}>W</span> = Work Date • <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>R</span> = Rest Date
+            </div>
+            <div>
+              Total Active Employees: <strong style={{ color: '#FFF' }}>{employees.length}</strong> • Month Shifts Total: <strong style={{ color: 'var(--primary)' }}>{monthShifts.length}</strong>
+            </div>
+          </div>
+
           {/* Scrollable Container for Branch Tables */}
           {branchesToRender.map((branchName) => {
             const branchShiftsInMonth = monthShifts.filter(s => s.branch === branchName);
@@ -685,16 +695,6 @@ export const ExcelExporter = ({ selectedBranch }) => {
               </div>
             );
           })}
-
-          {/* Footer Summary */}
-          <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div>
-              Note: <span style={{ color: 'var(--success)', fontWeight: 800 }}>W</span> = Work Date • <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>R</span> = Rest Date
-            </div>
-            <div>
-              Total Active Employees: <strong style={{ color: '#FFF' }}>{employees.length}</strong> • Month Shifts Total: <strong style={{ color: 'var(--primary)' }}>{monthShifts.length}</strong>
-            </div>
-          </div>
 
         </div>
 
