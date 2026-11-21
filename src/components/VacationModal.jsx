@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { useNotifications, formatSingleName } from '../context/NotificationContext';
 import { useBranches, isJakariaBranch } from '../context/BranchContext';
 import { db, collection, query, where, onSnapshot } from '../firebase';
@@ -17,10 +18,11 @@ import {
   ShieldCheck,
   AlertCircle
 } from 'lucide-react';
-import { format, parseISO, addDays, isBefore, startOfDay } from 'date-fns';
+import { format, parseISO, addDays, addMonths, startOfMonth, isBefore, startOfDay } from 'date-fns';
 
 export const VacationModal = ({ isOpen, onClose }) => {
   const { userProfile } = useAuth();
+  const { showAlert } = useToast();
   const { branchNames } = useBranches();
   const { handleSendVacationRequest, handleCancelVacation } = useNotifications();
 
@@ -30,6 +32,21 @@ export const VacationModal = ({ isOpen, onClose }) => {
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const tomorrowStr = format(addDays(new Date(), 1), 'yyyy-MM-dd');
 
+  // Month date computations
+  const now = useMemo(() => new Date(), []);
+  const nextMonthDate = useMemo(() => addMonths(now, 1), [now]);
+  const monthAfterNextDate = useMemo(() => addMonths(now, 2), [now]);
+
+  const nextMonthStr = useMemo(() => format(nextMonthDate, 'yyyy-MM'), [nextMonthDate]);
+  const nextMonthName = useMemo(() => format(nextMonthDate, 'MMMM yyyy'), [nextMonthDate]);
+
+  const monthAfterNextStr = useMemo(() => format(monthAfterNextDate, 'yyyy-MM'), [monthAfterNextDate]);
+  const monthAfterNextName = useMemo(() => format(monthAfterNextDate, 'MMMM yyyy'), [monthAfterNextDate]);
+
+  const firstDayNextMonth = useMemo(() => format(startOfMonth(nextMonthDate), 'yyyy-MM-dd'), [nextMonthDate]);
+  const firstDayAfterNextMonth = useMemo(() => format(startOfMonth(monthAfterNextDate), 'yyyy-MM-dd'), [monthAfterNextDate]);
+
+  const [shifts, setShifts] = useState([]);
   const [branch, setBranch] = useState(defaultUserBranch);
   const [startDate, setStartDate] = useState(tomorrowStr);
   const [endDate, setEndDate] = useState(tomorrowStr);
@@ -43,6 +60,53 @@ export const VacationModal = ({ isOpen, onClose }) => {
       setBranch(defaultUserBranch);
     }
   }, [defaultUserBranch, branch]);
+
+  // Listen to all shifts in real time to check whether the manager has started scheduling
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const unsubShifts = onSnapshot(collection(db, 'shifts'), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+      setShifts(list);
+    }, (err) => console.warn('Shifts query error in VacationModal:', err));
+
+    return () => unsubShifts();
+  }, [isOpen]);
+
+  // Check whether the manager already started ANY schedule for next month for this branch
+  const isNextMonthScheduled = useMemo(() => {
+    return shifts.some(s => {
+      if (!s.date || !s.date.startsWith(nextMonthStr)) return false;
+      if (branch && s.branch && s.branch.trim().toLowerCase() !== branch.trim().toLowerCase()) return false;
+      return true;
+    });
+  }, [shifts, nextMonthStr, branch]);
+
+  // Minimum allowed date:
+  // If manager already started scheduling next month, next month is locked -> earliest allowed is month after next.
+  // If not, next month is open for vacation requests -> earliest allowed is tomorrowStr (or firstDayNextMonth).
+  const minAllowedStartDate = useMemo(() => {
+    if (isNextMonthScheduled) {
+      return firstDayAfterNextMonth;
+    }
+    return tomorrowStr;
+  }, [isNextMonthScheduled, firstDayAfterNextMonth, tomorrowStr]);
+
+  // Auto-align dates when branch or scheduling status changes
+  useEffect(() => {
+    if (isNextMonthScheduled) {
+      if (!startDate || startDate < firstDayAfterNextMonth) {
+        setStartDate(firstDayAfterNextMonth);
+        setEndDate(firstDayAfterNextMonth);
+      }
+    } else {
+      if (!startDate || startDate < tomorrowStr) {
+        setStartDate(tomorrowStr);
+        setEndDate(tomorrowStr);
+      }
+    }
+  }, [isNextMonthScheduled, firstDayAfterNextMonth, tomorrowStr]);
 
   // Listen to my own vacation requests in real time
   useEffect(() => {
@@ -83,6 +147,17 @@ export const VacationModal = ({ isOpen, onClose }) => {
     if (!startDate || !endDate || !branch) return;
 
     if (endDate < startDate) {
+      showAlert('End date cannot be earlier than start date.', 'Invalid Dates', 'warning');
+      return;
+    }
+
+    // Strict validation: if manager already started next month's schedule, block selection in next month
+    if (isNextMonthScheduled && startDate < firstDayAfterNextMonth) {
+      showAlert(
+        `The branch manager has already started scheduling for ${nextMonthName}. Next month is locked for vacation requests. Please select dates from ${monthAfterNextName} (${firstDayAfterNextMonth}) onwards.`,
+        'Schedule Already Started',
+        'warning'
+      );
       return;
     }
 
@@ -254,6 +329,50 @@ export const VacationModal = ({ isOpen, onClose }) => {
               </div>
             </div>
 
+            {/* Next Month Scheduling Status Banner */}
+            {isNextMonthScheduled ? (
+              <div
+                style={{
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  borderRadius: '12px',
+                  padding: '0.75rem 0.9rem',
+                  marginBottom: '1rem',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '0.65rem'
+                }}
+              >
+                <AlertCircle size={18} color="#F87171" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div style={{ fontSize: '0.78rem', color: '#FCA5A5', lineHeight: 1.45 }}>
+                  <strong style={{ color: '#FFFFFF' }}>{nextMonthName} Schedule Already Started:</strong>
+                  <div>
+                    The manager has already scheduled shifts for {branch || 'this branch'} in {nextMonthName}.
+                    Vacation requests for {nextMonthName} are now closed. You can request vacation for{' '}
+                    <strong style={{ color: 'var(--accent-gold)' }}>{monthAfterNextName} ({firstDayAfterNextMonth})</strong> onwards.
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: 'rgba(52, 211, 153, 0.1)',
+                  border: '1px solid rgba(52, 211, 153, 0.3)',
+                  borderRadius: '12px',
+                  padding: '0.65rem 0.9rem',
+                  marginBottom: '1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.55rem'
+                }}
+              >
+                <CheckCircle2 size={16} color="#34D399" style={{ flexShrink: 0 }} />
+                <div style={{ fontSize: '0.76rem', color: '#6EE7B7', lineHeight: 1.4 }}>
+                  <strong style={{ color: '#FFFFFF' }}>{nextMonthName} Schedule Not Started:</strong> The manager has not made the schedule for {nextMonthName} yet. Vacation requests for next month can be sent now!
+                </div>
+              </div>
+            )}
+
             {/* Date Pickers */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
               <div>
@@ -263,7 +382,7 @@ export const VacationModal = ({ isOpen, onClose }) => {
                 <input
                   type="date"
                   className="form-control"
-                  min={todayStr}
+                  min={minAllowedStartDate}
                   value={startDate}
                   onChange={(e) => {
                     setStartDate(e.target.value);
@@ -291,7 +410,7 @@ export const VacationModal = ({ isOpen, onClose }) => {
                 <input
                   type="date"
                   className="form-control"
-                  min={startDate || todayStr}
+                  min={startDate || minAllowedStartDate}
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
                   required
