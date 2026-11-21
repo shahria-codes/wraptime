@@ -7,6 +7,7 @@ import { db, collection, doc, setDoc, updateDoc, onSnapshot } from '../firebase'
 import { useBranches } from '../context/BranchContext';
 import { UserAvatar } from './UserAvatar';
 import { ShiftSwapModal } from './ShiftSwapModal';
+import { VacationModal } from './VacationModal';
 import { 
   Clock, 
   Users, 
@@ -23,7 +24,8 @@ import {
   Timer,
   Check,
   X,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Palmtree
 } from 'lucide-react';
 import { 
   format, 
@@ -74,6 +76,10 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
     setIsSwapModalOpen(true);
   };
 
+  // Vacation Modal state
+  const [isVacationModalOpen, setIsVacationModalOpen] = useState(false);
+  const [myVacations, setMyVacations] = useState([]);
+
   // Check-In Modal state
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
   const [checkInBranch, setCheckInBranch] = useState(branchNames[0] || '');
@@ -105,9 +111,16 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
       setLoading(false);
     }, (err) => console.error("Firestore users error:", err));
 
+    const unsubscribeVacations = onSnapshot(collection(db, 'vacations'), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+      setMyVacations(list);
+    }, (err) => console.warn("Firestore vacations error:", err));
+
     return () => {
       unsubscribeShifts();
       unsubscribeUsers();
+      unsubscribeVacations();
     };
   }, []);
 
@@ -871,70 +884,127 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                 </p>
               </div>
 
-              {/* Filter Tabs */}
-              <div style={{
-                display: 'inline-flex',
-                background: 'rgba(15, 23, 42, 0.8)',
-                padding: '4px',
-                borderRadius: '12px',
-                border: '1px solid var(--border-glass)',
-                gap: '4px'
-              }}>
+              {/* Action Buttons & Filter Tabs */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  onClick={() => setScheduleFilter('upcoming')}
+                  onClick={() => setIsVacationModalOpen(true)}
                   style={{
-                    border: 'none',
-                    background: scheduleFilter === 'upcoming' ? 'var(--primary)' : 'transparent',
-                    color: scheduleFilter === 'upcoming' ? '#0F172A' : 'var(--text-muted)',
-                    fontWeight: 700,
-                    fontSize: '0.78rem',
+                    background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(217, 119, 6, 0.15) 100%)',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    color: 'var(--accent-gold)',
+                    borderRadius: '12px',
                     padding: '6px 14px',
-                    borderRadius: '8px',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
                     cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    boxShadow: '0 2px 10px rgba(245, 158, 11, 0.15)',
                     transition: 'all 0.15s ease'
                   }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-1px)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
                 >
-                  Upcoming ({upcomingShifts.length})
+                  <Palmtree size={14} /> <span>Request Vacation</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setScheduleFilter('all')}
-                  style={{
-                    border: 'none',
-                    background: scheduleFilter === 'all' ? 'var(--primary)' : 'transparent',
-                    color: scheduleFilter === 'all' ? '#0F172A' : 'var(--text-muted)',
-                    fontWeight: 700,
-                    fontSize: '0.78rem',
-                    padding: '6px 14px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  All ({myShifts.length})
-                </button>
+                {/* Filter Tabs */}
+                <div style={{
+                  display: 'inline-flex',
+                  background: 'rgba(15, 23, 42, 0.8)',
+                  padding: '4px',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-glass)',
+                  gap: '4px'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleFilter('upcoming')}
+                    style={{
+                      border: 'none',
+                      background: scheduleFilter === 'upcoming' ? 'var(--primary)' : 'transparent',
+                      color: scheduleFilter === 'upcoming' ? '#0F172A' : 'var(--text-muted)',
+                      fontWeight: 700,
+                      fontSize: '0.78rem',
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Upcoming ({upcomingShifts.length})
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setScheduleFilter('past')}
-                  style={{
-                    border: 'none',
-                    background: scheduleFilter === 'past' ? 'var(--primary)' : 'transparent',
-                    color: scheduleFilter === 'past' ? '#0F172A' : 'var(--text-muted)',
-                    fontWeight: 700,
-                    fontSize: '0.78rem',
-                    padding: '6px 14px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  Past ({pastShifts.length})
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleFilter('all')}
+                    style={{
+                      border: 'none',
+                      background: scheduleFilter === 'all' ? 'var(--primary)' : 'transparent',
+                      color: scheduleFilter === 'all' ? '#0F172A' : 'var(--text-muted)',
+                      fontWeight: 700,
+                      fontSize: '0.78rem',
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    All ({myShifts.length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setScheduleFilter('past')}
+                    style={{
+                      border: 'none',
+                      background: scheduleFilter === 'past' ? 'var(--primary)' : 'transparent',
+                      color: scheduleFilter === 'past' ? '#0F172A' : 'var(--text-muted)',
+                      fontWeight: 700,
+                      fontSize: '0.78rem',
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Past ({pastShifts.length})
+                  </button>
+                </div>
               </div>
             </div>
+
+            {/* Approved Vacations Banner for Employee */}
+            {(() => {
+              const myApproved = myVacations.filter(v => v.userId === myUid && v.status === 'approved');
+              if (myApproved.length === 0) return null;
+              return (
+                <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {myApproved.map(v => (
+                    <div
+                      key={v.id}
+                      style={{
+                        background: 'rgba(52, 211, 153, 0.12)',
+                        border: '1px solid rgba(52, 211, 153, 0.35)',
+                        borderRadius: '10px',
+                        padding: '5px 12px',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        color: '#34D399',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem'
+                      }}
+                    >
+                      <Palmtree size={13} />
+                      <span>Approved Vacation: <strong>{format(parseISO(v.startDate), 'MMM d')} – {format(parseISO(v.endDate), 'MMM d')}</strong> at 📍 {v.branch}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Empty States */}
             {displayedShifts.length === 0 ? (
@@ -2242,6 +2312,12 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
         myUpcomingShifts={upcomingShifts}
         allShifts={shifts}
         employees={allEmployees}
+      />
+
+      {/* ── Vacation Request Modal ── */}
+      <VacationModal
+        isOpen={isVacationModalOpen}
+        onClose={() => setIsVacationModalOpen(false)}
       />
 
     </div>

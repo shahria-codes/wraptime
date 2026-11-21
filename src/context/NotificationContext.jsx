@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useMemo 
 import { db, collection, doc, updateDoc, setDoc, deleteDoc, onSnapshot, query, orderBy } from '../firebase';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
+import { isBranchManager } from './BranchContext';
 
 export const formatSingleName = (displayName) => {
   if (!displayName) return 'Staff';
@@ -122,7 +123,8 @@ export const NotificationProvider = ({ children }) => {
           const isForMe =
             n.recipientUid === myUid ||
             n.targetUserId === myUid ||
-            (isManager && n.type === 'NEW_USER_PENDING' && n.status === 'pending');
+            (isManager && n.type === 'NEW_USER_PENDING' && n.status === 'pending') ||
+            (isManager && n.type === 'VACATION_REQUEST' && n.status === 'pending' && isBranchManager(userProfile, n.branch));
 
           if (!isForMe) return;
 
@@ -146,6 +148,18 @@ export const NotificationProvider = ({ children }) => {
             const who = n.userName || 'A new employee';
             title = '👤 New Staff Registration';
             body  = `${who} is waiting for your approval.`;
+          } else if (n.type === 'VACATION_REQUEST') {
+            const who = n.requesterSingleName || formatSingleName(n.requesterName) || 'An employee';
+            title = '🏖️ Vacation Request';
+            body  = `${who} requested vacation from ${n.startDate} to ${n.endDate} at ${n.branch}.`;
+          } else if (n.type === 'VACATION_RESOLVED') {
+            const who = n.actorSingleName || 'Your branch manager';
+            title = n.status === 'approved'
+              ? '🏖️ Vacation Approved'
+              : '❌ Vacation Declined';
+            body = n.status === 'approved'
+              ? `${who} approved your vacation from ${n.startDate} to ${n.endDate}.`
+              : `${who} declined your vacation request.`;
           }
 
           pushDeviceNotif(title, body);
@@ -193,13 +207,26 @@ export const NotificationProvider = ({ children }) => {
     // Filter notifications relevant to current user:
     // - Managers see:
     //    1. Swap requests where they are recipient or requester, or any shift swap notification
-    //    2. Standard system notifications
+    //    2. Vacation requests for branches they DESIGNATEDLY manage (only the designated branch manager)
+    //    3. Standard system notifications & pending staff approvals
     // - Employees see:
     //    1. Swap requests where recipientUid === myUid or requesterUid === myUid
     //    2. Resolved swap notifications addressed to them (recipientUid === myUid)
+    //    3. Vacation requests they submitted (requesterUid === myUid)
+    //    4. Resolved vacation notifications addressed to them (recipientUid === myUid)
     const userNotifs = rawNotifications.filter(n => {
       if (n.type === 'SHIFT_SWAP_REQUEST' || n.type === 'SHIFT_SWAP_RESOLVED') {
         return n.recipientUid === myUid || n.requesterUid === myUid || isManager;
+      }
+      if (n.type === 'VACATION_REQUEST') {
+        // Employee who requested it:
+        if (n.requesterUid === myUid) return true;
+        // Designated branch manager ONLY:
+        if (isManager && isBranchManager(userProfile, n.branch)) return true;
+        return false;
+      }
+      if (n.type === 'VACATION_RESOLVED') {
+        return n.recipientUid === myUid;
       }
       if (isManager) return true;
       return n.recipientUid === myUid || n.targetUserId === myUid;
@@ -233,15 +260,23 @@ export const NotificationProvider = ({ children }) => {
 
     return Array.from(map.values()).sort((a, b) => {
       // Pending actions first
-      const aIsPendingAction = (a.status === 'pending' && (a.recipientUid === myUid || (isManager && a.type === 'NEW_USER_PENDING')));
-      const bIsPendingAction = (b.status === 'pending' && (b.recipientUid === myUid || (isManager && b.type === 'NEW_USER_PENDING')));
+      const aIsPendingAction = (
+        (a.status === 'pending' && a.recipientUid === myUid) ||
+        (isManager && a.type === 'NEW_USER_PENDING' && a.status === 'pending') ||
+        (isManager && a.type === 'VACATION_REQUEST' && a.status === 'pending' && isBranchManager(userProfile, a.branch))
+      );
+      const bIsPendingAction = (
+        (b.status === 'pending' && b.recipientUid === myUid) ||
+        (isManager && b.type === 'NEW_USER_PENDING' && b.status === 'pending') ||
+        (isManager && b.type === 'VACATION_REQUEST' && b.status === 'pending' && isBranchManager(userProfile, b.branch))
+      );
 
       if (aIsPendingAction && !bIsPendingAction) return -1;
       if (!aIsPendingAction && bIsPendingAction) return 1;
 
       return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
     });
-  }, [rawNotifications, pendingUsers, myUid, isManager]);
+  }, [rawNotifications, pendingUsers, myUid, isManager, userProfile]);
 
   // Count unread or pending items that require action from the current user
   const unreadCount = useMemo(() => {
@@ -255,13 +290,18 @@ export const NotificationProvider = ({ children }) => {
       if (isManager && n.type === 'NEW_USER_PENDING' && n.status === 'pending') {
         return true;
       }
-      // Resolved swap notification for requester that is unread
-      if (n.type === 'SHIFT_SWAP_RESOLVED' && n.recipientUid === myUid && !n.read) {
+      // If manager and pending vacation request for their branch
+      if (isManager && n.type === 'VACATION_REQUEST') {
+        if (n.status === 'pending' && isBranchManager(userProfile, n.branch)) return true;
+        return false;
+      }
+      // Resolved swap or vacation notification for requester that is unread
+      if ((n.type === 'SHIFT_SWAP_RESOLVED' || n.type === 'VACATION_RESOLVED') && n.recipientUid === myUid && !n.read) {
         return true;
       }
       return !n.read;
     }).length;
-  }, [allNotifications, myUid, isManager]);
+  }, [allNotifications, myUid, isManager, userProfile]);
 
   // ── 1. Shift Swap Request Creation ──
   const handleSendSwapRequest = async ({ myShift, targetShift, targetUser }) => {
@@ -495,6 +535,184 @@ export const NotificationProvider = ({ children }) => {
     }
   };
 
+  // ── 7. Send Vacation Request (Employee) ──
+  const handleSendVacationRequest = async ({ startDate, endDate, branch, reason }) => {
+    if (!startDate || !endDate || !branch || !userProfile) {
+      throw new Error('Please fill in all vacation details.');
+    }
+
+    try {
+      const now = new Date().toISOString();
+      const vacRef = doc(collection(db, 'vacations'));
+      const notifRef = doc(collection(db, 'notifications'));
+
+      // 1. Create vacation record in Firestore
+      const vacData = {
+        id: vacRef.id,
+        userId: userProfile.uid,
+        userDisplayName: userProfile.displayName || 'Employee',
+        userPhotoURL: userProfile.photoURL || '',
+        branch,
+        startDate,
+        endDate,
+        reason: reason || '',
+        status: 'pending',
+        createdAt: now,
+        updatedAt: now,
+        reviewedBy: null,
+        reviewedByName: null,
+        reviewedAt: null
+      };
+      await setDoc(vacRef, vacData);
+
+      // 2. Create notification record targeting the designated branch manager
+      const notifData = {
+        id: notifRef.id,
+        type: 'VACATION_REQUEST',
+        vacationId: vacRef.id,
+        status: 'pending',
+        requesterUid: userProfile.uid,
+        requesterName: userProfile.displayName || 'Employee',
+        requesterSingleName: formatSingleName(userProfile.displayName),
+        requesterPhotoURL: userProfile.photoURL || '',
+        branch,
+        startDate,
+        endDate,
+        reason: reason || '',
+        read: false,
+        createdAt: now
+      };
+      await setDoc(notifRef, notifData);
+
+      showAlert(`Vacation request submitted for ${branch} branch manager review!`, 'Request Submitted', 'success');
+      return vacRef.id;
+    } catch (err) {
+      console.error('Error submitting vacation request:', err);
+      showAlert('Failed to submit vacation request. Please try again.', 'Error', 'error');
+      throw err;
+    }
+  };
+
+  // ── 8. Approve Vacation Request (Designated Branch Manager) ──
+  const handleApproveVacation = async (notif) => {
+    try {
+      const now = new Date().toISOString();
+
+      // 1. Update vacation doc in Firestore
+      if (notif.vacationId) {
+        await updateDoc(doc(db, 'vacations', notif.vacationId), {
+          status: 'approved',
+          reviewedBy: userProfile.uid,
+          reviewedByName: userProfile.displayName,
+          reviewedAt: now,
+          updatedAt: now
+        });
+      }
+
+      // 2. Update notification doc to approved
+      await updateDoc(doc(db, 'notifications', notif.id), {
+        status: 'approved',
+        read: true,
+        resolvedAt: now,
+        updatedAt: now
+      });
+
+      // 3. Send resolution notification to the requesting employee
+      const resRef = doc(collection(db, 'notifications'));
+      await setDoc(resRef, {
+        id: resRef.id,
+        type: 'VACATION_RESOLVED',
+        status: 'approved',
+        vacationId: notif.vacationId || '',
+        recipientUid: notif.requesterUid,
+        recipientName: notif.requesterName,
+        actorUid: userProfile.uid,
+        actorName: userProfile.displayName,
+        actorSingleName: formatSingleName(userProfile.displayName),
+        actorPhotoURL: userProfile.photoURL || '',
+        branch: notif.branch,
+        startDate: notif.startDate,
+        endDate: notif.endDate,
+        title: 'Vacation Request Approved',
+        read: false,
+        createdAt: now
+      });
+
+      showAlert(`Vacation approved for ${formatSingleName(notif.requesterName)}!`, 'Vacation Approved', 'success');
+    } catch (err) {
+      console.error('Error approving vacation request:', err);
+      showAlert('Failed to approve vacation request. Please try again.', 'Error', 'error');
+    }
+  };
+
+  // ── 9. Reject Vacation Request (Designated Branch Manager) ──
+  const handleRejectVacation = async (notif) => {
+    try {
+      const now = new Date().toISOString();
+
+      // 1. Update vacation doc in Firestore
+      if (notif.vacationId) {
+        await updateDoc(doc(db, 'vacations', notif.vacationId), {
+          status: 'rejected',
+          reviewedBy: userProfile.uid,
+          reviewedByName: userProfile.displayName,
+          reviewedAt: now,
+          updatedAt: now
+        });
+      }
+
+      // 2. Update notification doc to rejected
+      await updateDoc(doc(db, 'notifications', notif.id), {
+        status: 'rejected',
+        read: true,
+        resolvedAt: now,
+        updatedAt: now
+      });
+
+      // 3. Send resolution notification to requesting employee
+      const resRef = doc(collection(db, 'notifications'));
+      await setDoc(resRef, {
+        id: resRef.id,
+        type: 'VACATION_RESOLVED',
+        status: 'rejected',
+        vacationId: notif.vacationId || '',
+        recipientUid: notif.requesterUid,
+        recipientName: notif.requesterName,
+        actorUid: userProfile.uid,
+        actorName: userProfile.displayName,
+        actorSingleName: formatSingleName(userProfile.displayName),
+        actorPhotoURL: userProfile.photoURL || '',
+        branch: notif.branch,
+        startDate: notif.startDate,
+        endDate: notif.endDate,
+        title: 'Vacation Request Declined',
+        read: false,
+        createdAt: now
+      });
+
+      showAlert(`Vacation request for ${formatSingleName(notif.requesterName)} has been declined.`, 'Vacation Declined', 'info');
+    } catch (err) {
+      console.error('Error rejecting vacation request:', err);
+      showAlert('Failed to decline vacation request.', 'Error', 'error');
+    }
+  };
+
+  // ── 10. Cancel Vacation Request (Employee) ──
+  const handleCancelVacation = async (vacationId, notifId) => {
+    try {
+      if (vacationId) {
+        await deleteDoc(doc(db, 'vacations', vacationId));
+      }
+      if (notifId) {
+        await deleteDoc(doc(db, 'notifications', notifId));
+      }
+      showAlert('Vacation request cancelled.', 'Request Cancelled', 'info');
+    } catch (err) {
+      console.error('Error cancelling vacation request:', err);
+      showAlert('Failed to cancel vacation request.', 'Error', 'error');
+    }
+  };
+
   // Mark all as read
   const markAllAsRead = async () => {
     try {
@@ -527,6 +745,10 @@ export const NotificationProvider = ({ children }) => {
         handleApproveSwap,
         handleRejectSwap,
         handleCancelSwap,
+        handleSendVacationRequest,
+        handleApproveVacation,
+        handleRejectVacation,
+        handleCancelVacation,
         handleApproveUser,
         handleRejectUser,
         markAllAsRead,
@@ -548,6 +770,10 @@ export const useNotifications = () => {
     handleApproveSwap: async () => {},
     handleRejectSwap: async () => {},
     handleCancelSwap: async () => {},
+    handleSendVacationRequest: async () => {},
+    handleApproveVacation: async () => {},
+    handleRejectVacation: async () => {},
+    handleCancelVacation: async () => {},
     handleApproveUser: async () => {},
     handleRejectUser: async () => {},
     markAllAsRead: async () => {},

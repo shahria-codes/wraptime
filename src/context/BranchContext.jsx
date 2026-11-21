@@ -62,6 +62,39 @@ export const getManagerBranches = (user, branches = []) => {
   });
 };
 
+/**
+ * Check if a manager user is the designated manager for a given branch name.
+ * - Jakaria manages Antakalnis, Paupys Turgus, and Vilnius Outlet
+ * - Nur manages Panorama, Verkiu, and other branches
+ */
+export const isBranchManager = (user, branchName = '', branches = []) => {
+  if (!user || user.role !== 'manager') return false;
+  const name = (user.displayName || '').toLowerCase();
+  const email = (user.email || '').toLowerCase();
+  const isJakaria = name.includes('jakaria') || email.includes('jakaria');
+  const isNur = name.includes('nur') || email.includes('nur');
+  const isJak = isJakariaBranch(branchName);
+
+  if (isJak) {
+    return isJakaria;
+  }
+  if (isNur) {
+    return !isJak;
+  }
+
+  // Fallback check against branch list if available
+  if (branches && branches.length > 0) {
+    const br = branches.find(b => (b.name || '').toLowerCase() === (branchName || '').toLowerCase());
+    if (br) {
+      const uid = user.uid || user.id;
+      if (br.createdBy && uid && br.createdBy === uid) return true;
+      if (br.createdByName && br.createdByName.toLowerCase() === name) return true;
+    }
+  }
+
+  return true;
+};
+
 const BranchContext = createContext(null);
 
 export const useBranches = () => {

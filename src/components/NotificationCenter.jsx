@@ -10,7 +10,9 @@ import {
   CheckCheck,
   ArrowLeftRight,
   Clock,
-  Trash2
+  Trash2,
+  Palmtree,
+  CalendarDays
 } from 'lucide-react';
 import { formatDistanceToNow, parseISO, format } from 'date-fns';
 
@@ -24,6 +26,9 @@ export const NotificationCenter = () => {
     handleApproveSwap,
     handleRejectSwap,
     handleCancelSwap,
+    handleApproveVacation,
+    handleRejectVacation,
+    handleCancelVacation,
     markAllAsRead,
     dismissNotification
   } = useNotifications();
@@ -97,6 +102,36 @@ export const NotificationCenter = () => {
     setProcessingId(item.id);
     try {
       await handleCancelSwap(item.id);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const onApproveVacation = async (item, e) => {
+    e.stopPropagation();
+    setProcessingId(item.id);
+    try {
+      await handleApproveVacation(item);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const onRejectVacation = async (item, e) => {
+    e.stopPropagation();
+    setProcessingId(item.id);
+    try {
+      await handleRejectVacation(item);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const onCancelVacation = async (item, e) => {
+    e.stopPropagation();
+    setProcessingId(item.id);
+    try {
+      await handleCancelVacation(item.vacationId, item.id);
     } finally {
       setProcessingId(null);
     }
@@ -641,7 +676,321 @@ export const NotificationCenter = () => {
                   );
                 }
 
-                // ── Case C: New User Pending Approval (Manager) ──
+                // ── Case C: Vacation Request (Only Designated Branch Manager or Requester) ──
+                if (item.type === 'VACATION_REQUEST') {
+                  const isRequester = item.requesterUid === myUid;
+                  const isPending = item.status === 'pending';
+                  const isApproved = item.status === 'approved';
+                  const isRejected = item.status === 'rejected';
+
+                  const requesterSingle = item.requesterSingleName || formatSingleName(item.requesterName);
+                  const startFriendly = formatFriendlyDate(item.startDate);
+                  const endFriendly = formatFriendlyDate(item.endDate);
+
+                  let daysCount = 1;
+                  try {
+                    const s = parseISO(item.startDate);
+                    const e = parseISO(item.endDate);
+                    daysCount = Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1);
+                  } catch (_) {}
+
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        background: isPending && !isRequester
+                          ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(15, 23, 42, 0.8) 100%)'
+                          : 'rgba(255, 255, 255, 0.02)',
+                        border: isPending && !isRequester
+                          ? '1px solid rgba(245, 158, 11, 0.4)'
+                          : '1px solid rgba(255, 255, 255, 0.06)',
+                        borderRadius: '12px',
+                        padding: '0.75rem 0.85rem',
+                        marginBottom: '0.5rem',
+                        transition: 'all 0.15s ease',
+                        boxShadow: isPending && !isRequester ? '0 4px 16px rgba(245, 158, 11, 0.15)' : 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                        <div style={{ position: 'relative', flexShrink: 0 }}>
+                          <UserAvatar
+                            photoURL={item.requesterPhotoURL}
+                            displayName={item.requesterName}
+                            size={36}
+                          />
+                          <div
+                            style={{
+                              position: 'absolute',
+                              bottom: -2,
+                              right: -2,
+                              background: '#F59E0B',
+                              color: '#0F172A',
+                              borderRadius: '50%',
+                              width: 15,
+                              height: 15,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1.5px solid #080E1E'
+                            }}
+                          >
+                            <Palmtree size={9} strokeWidth={2.5} />
+                          </div>
+                        </div>
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.3rem' }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.84rem', color: '#FFFFFF' }}>
+                              {isRequester ? 'Your Vacation Request' : requesterSingle}
+                            </span>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                              {formatTime(item.createdAt)}
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: '0.78rem', color: '#E2E8F0', marginTop: '3px', lineHeight: 1.35 }}>
+                            {isRequester ? (
+                              <>
+                                You requested <strong style={{ color: 'var(--accent-gold)' }}>{daysCount} {daysCount === 1 ? 'day' : 'days'}</strong> off from{' '}
+                                <strong style={{ color: '#38BDF8' }}>{startFriendly}</strong> to <strong style={{ color: '#38BDF8' }}>{endFriendly}</strong>.
+                              </>
+                            ) : (
+                              <>
+                                <strong style={{ color: 'var(--accent-gold)' }}>{requesterSingle}</strong> requested{' '}
+                                <strong style={{ color: 'var(--accent-gold)' }}>{daysCount} {daysCount === 1 ? 'day' : 'days'}</strong> off from{' '}
+                                <strong style={{ color: '#38BDF8' }}>{startFriendly}</strong> to <strong style={{ color: '#38BDF8' }}>{endFriendly}</strong>.
+                              </>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '5px', flexWrap: 'wrap' }}>
+                            <span
+                              style={{
+                                background: 'rgba(245, 158, 11, 0.15)',
+                                border: '1px solid rgba(245, 158, 11, 0.35)',
+                                color: 'var(--accent-gold)',
+                                fontSize: '0.67rem',
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: '6px'
+                              }}
+                            >
+                              📍 {item.branch}
+                            </span>
+                            <span
+                              style={{
+                                background: 'rgba(56, 189, 248, 0.12)',
+                                border: '1px solid rgba(56, 189, 248, 0.3)',
+                                color: '#38BDF8',
+                                fontSize: '0.67rem',
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: '6px'
+                              }}
+                            >
+                              🏖️ {daysCount} Days
+                            </span>
+                          </div>
+
+                          {item.reason && (
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', fontStyle: 'italic' }}>
+                              "{item.reason}"
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action Row */}
+                      <div style={{ marginTop: '0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.45rem' }}>
+                        {!isRequester && isPending ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={isProcessing}
+                              onClick={(e) => onRejectVacation(item, e)}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.12)',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                                color: '#F87171',
+                                padding: '0.35rem 0.75rem',
+                                borderRadius: '8px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <XCircle size={13} />
+                              <span>Reject</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isProcessing}
+                              onClick={(e) => onApproveVacation(item, e)}
+                              style={{
+                                background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                                border: 'none',
+                                color: '#FFFFFF',
+                                padding: '0.35rem 0.85rem',
+                                borderRadius: '8px',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <CheckCircle2 size={13} />
+                              <span>{isProcessing ? 'Processing…' : 'Approve Vacation'}</span>
+                            </button>
+                          </>
+                        ) : isRequester && isPending ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                color: 'var(--accent-gold)'
+                              }}
+                            >
+                              <Clock size={12} /> Pending branch manager review
+                            </span>
+                            <button
+                              type="button"
+                              disabled={isProcessing}
+                              onClick={(e) => onCancelVacation(item, e)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#F87171',
+                                cursor: 'pointer',
+                                fontSize: '0.68rem',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.2rem'
+                              }}
+                            >
+                              <Trash2 size={11} /> Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                color: isApproved ? 'var(--success)' : '#F87171'
+                              }}
+                            >
+                              {isApproved ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                              {isApproved ? 'Vacation Approved' : 'Vacation Declined'}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => dismissNotification(item.id)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-subtle)',
+                                cursor: 'pointer',
+                                fontSize: '0.65rem'
+                              }}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // ── Case D: Vacation Request Resolved ──
+                if (item.type === 'VACATION_RESOLVED') {
+                  const isApproved = item.status === 'approved';
+                  const actorSingle = item.actorSingleName || formatSingleName(item.actorName);
+                  const startFriendly = formatFriendlyDate(item.startDate);
+                  const endFriendly = formatFriendlyDate(item.endDate);
+
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        background: isApproved ? 'rgba(52, 211, 153, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                        border: isApproved ? '1px solid rgba(52, 211, 153, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                        borderRadius: '12px',
+                        padding: '0.75rem 0.85rem',
+                        marginBottom: '0.5rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                        <UserAvatar
+                          photoURL={item.actorPhotoURL}
+                          displayName={item.actorName}
+                          size={34}
+                        />
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.3rem' }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.84rem', color: '#FFFFFF' }}>
+                              {item.title || 'Vacation Request Update'}
+                            </span>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                              {formatTime(item.createdAt)}
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: '0.76rem', color: '#E2E8F0', marginTop: '3px', lineHeight: 1.35 }}>
+                            {isApproved ? (
+                              <>
+                                <strong style={{ color: 'var(--accent-gold)' }}>{actorSingle}</strong> approved your vacation from{' '}
+                                <strong style={{ color: '#34D399' }}>{startFriendly}</strong> to <strong style={{ color: '#34D399' }}>{endFriendly}</strong> at 📍 {item.branch}!
+                              </>
+                            ) : (
+                              <>
+                                <strong style={{ color: 'var(--accent-gold)' }}>{actorSingle}</strong> declined your vacation request from{' '}
+                                <strong style={{ color: '#F87171' }}>{startFriendly}</strong> to <strong style={{ color: '#F87171' }}>{endFriendly}</strong>.
+                              </>
+                            )}
+                          </div>
+
+                          <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              onClick={() => dismissNotification(item.id)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-subtle)',
+                                cursor: 'pointer',
+                                fontSize: '0.65rem'
+                              }}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // ── Case E: New User Pending Approval (Manager) ──
                 const isPending = item.status === 'pending';
                 const isAuthorized = item.status === 'authorized';
 

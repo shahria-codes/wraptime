@@ -19,7 +19,8 @@ import {
   Zap,
   Check,
   AlertTriangle,
-  X
+  X,
+  Palmtree
 } from 'lucide-react';
 import { 
   format, 
@@ -48,6 +49,7 @@ export const ManagerDashboard = ({ selectedBranch }) => {
   const [currentWeekStart, setCurrentWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [shifts, setShifts] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [vacations, setVacations] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Modal State
@@ -98,14 +100,26 @@ export const ManagerDashboard = ({ selectedBranch }) => {
       setLoading(false);
     }, (err) => console.error("Firestore users error:", err));
 
+    const unsubscribeVacations = onSnapshot(collection(db, 'vacations'), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+      setVacations(list);
+    }, (err) => console.warn("Firestore vacations error:", err));
+
     return () => {
       unsubscribeShifts();
       unsubscribeUsers();
+      unsubscribeVacations();
     };
   }, []);
 
   // Only employees (not managers) are schedulable
   const schedulableEmployees = employees.filter(emp => emp.role !== 'manager');
+
+  // Approved vacations list
+  const approvedVacations = React.useMemo(() => {
+    return vacations.filter(v => v.status === 'approved');
+  }, [vacations]);
 
   // Employee lookup map for quick access to photoURL & metadata
   const employeeMap = React.useMemo(() => {
@@ -298,6 +312,15 @@ export const ManagerDashboard = ({ selectedBranch }) => {
       return;
     }
 
+    // Check vacation restriction for selected employee(s)
+    const targetUids = selectedUserIds.length > 0 ? selectedUserIds : (formUserId ? [formUserId] : []);
+    const vacConflict = approvedVacations.find(v => targetUids.includes(v.userId) && dateStr >= v.startDate && dateStr <= v.endDate);
+    if (vacConflict && !selectedDates.includes(dateStr)) {
+      const emp = employees.find(e => (e.uid || e.id) === vacConflict.userId);
+      showAlert(`Cannot schedule ${emp?.displayName || vacConflict.userDisplayName || 'employee'} on ${dateStr}:\nOn approved vacation from ${vacConflict.startDate} to ${vacConflict.endDate}.`, "Employee on Vacation", "warning");
+      return;
+    }
+
     if (selectedDates.includes(dateStr)) {
       setSelectedDates(selectedDates.filter(d => d !== dateStr));
       if (activeDatePrompt === dateStr) {
@@ -317,11 +340,16 @@ export const ManagerDashboard = ({ selectedBranch }) => {
     const validDates = [];
     const today = startOfDay(new Date());
     const newDateBranches = { ...dateBranches };
+    const targetUids = selectedUserIds.length > 0 ? selectedUserIds : (formUserId ? [formUserId] : []);
 
     monthDays.forEach(d => {
       // Skip past dates
       if (isBefore(startOfDay(d), today)) return;
       const dStr = format(d, 'yyyy-MM-dd');
+      // Skip dates where any selected employee is on vacation
+      const onVac = approvedVacations.some(v => targetUids.includes(v.userId) && dStr >= v.startDate && dStr <= v.endDate);
+      if (onVac) return;
+
       validDates.push(dStr);
       if (!newDateBranches[dStr]) {
         newDateBranches[dStr] = formBranch;
@@ -349,6 +377,18 @@ export const ManagerDashboard = ({ selectedBranch }) => {
     if (selectedDates.length === 0) {
       showAlert("Please select at least one working date.", "Selection Required", "warning");
       return;
+    }
+
+    // Vacation conflict validation
+    for (const uid of selectedUserIds) {
+      for (const dStr of selectedDates) {
+        const vacConflict = approvedVacations.find(v => v.userId === uid && dStr >= v.startDate && dStr <= v.endDate);
+        if (vacConflict) {
+          const emp = employees.find(e => (e.uid || e.id) === uid);
+          showAlert(`Cannot schedule ${emp?.displayName || 'employee'} on ${dStr}:\nOn approved vacation from ${vacConflict.startDate} to ${vacConflict.endDate}.`, "Vacation Conflict", "error");
+          return;
+        }
+      }
     }
 
     // Past date validation
@@ -586,6 +626,41 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                   <Plus size={14} /> Schedule
                 </button>
               </div>
+
+              {/* Vacations on this day */}
+              {(() => {
+                const dayVacations = approvedVacations.filter(v => {
+                  if (selectedBranch !== 'ALL' && v.branch !== selectedBranch) return false;
+                  return dateStr >= v.startDate && dateStr <= v.endDate;
+                });
+                if (dayVacations.length === 0) return null;
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginBottom: '0.45rem' }}>
+                    {dayVacations.map(vac => (
+                      <div
+                        key={vac.id}
+                        title={`${vac.userDisplayName} is on approved vacation (${vac.startDate} to ${vac.endDate}) at ${vac.branch}`}
+                        style={{
+                          background: 'rgba(245, 158, 11, 0.12)',
+                          border: '1px solid rgba(245, 158, 11, 0.35)',
+                          borderRadius: '8px',
+                          padding: '3px 6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          fontSize: '0.7rem',
+                          color: 'var(--accent-gold)'
+                        }}
+                      >
+                        <UserAvatar photoURL={vac.userPhotoURL} displayName={vac.userDisplayName} size={16} />
+                        <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {formatSingleName(vac.userDisplayName)} (🏖️ Vacation)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* Day Shifts */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
@@ -920,6 +995,7 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                     {schedulableEmployees.map(emp => {
                       const uid = emp.uid || emp.id;
                       const isSelected = selectedUserIds.includes(uid);
+                      const empVac = approvedVacations.find(v => v.userId === uid);
 
                       return (
                         <div
@@ -947,6 +1023,22 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                           }}>
                             {formatSingleName(emp.displayName)}
                           </span>
+                          {empVac && (
+                            <span
+                              title={`Approved vacation: ${empVac.startDate} to ${empVac.endDate} at ${empVac.branch}`}
+                              style={{
+                                fontSize: '0.62rem',
+                                background: 'rgba(245, 158, 11, 0.2)',
+                                border: '1px solid rgba(245, 158, 11, 0.4)',
+                                color: 'var(--accent-gold)',
+                                borderRadius: '4px',
+                                padding: '1px 4px',
+                                fontWeight: 700
+                              }}
+                            >
+                              🏖️ Vacation
+                            </span>
+                          )}
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -1103,29 +1195,43 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                           const conflictLocation = existingShiftOnDate ? existingShiftOnDate.branch : null;
                           const assignedBranch = dateBranches[dStr] || formBranch;
 
+                          // Check approved vacation conflict
+                          const vacConflict = approvedVacations.find(v => targetUids.includes(v.userId) && dStr >= v.startDate && dStr <= v.endDate);
+                          const isOnVacation = !!vacConflict;
+
                           return (
                             <button
                               key={dStr}
                               type="button"
-                              disabled={isPast}
-                              onClick={() => !isPast && toggleDateSelection(dStr)}
+                              disabled={isPast || isOnVacation}
+                              onClick={() => !isPast && !isOnVacation && toggleDateSelection(dStr)}
                               title={
-                                isPast 
-                                  ? "Past date - cannot be scheduled" 
-                                  : conflictLocation 
-                                    ? `Currently scheduled at ${conflictLocation}` 
-                                    : `${format(d, 'MMM d, yyyy')}: ${assignedBranch}`
+                                isOnVacation
+                                  ? `On approved vacation: ${vacConflict.userDisplayName} (${vacConflict.startDate} to ${vacConflict.endDate}) - cannot be scheduled`
+                                  : isPast 
+                                    ? "Past date - cannot be scheduled" 
+                                    : conflictLocation 
+                                      ? `Currently scheduled at ${conflictLocation}` 
+                                      : `${format(d, 'MMM d, yyyy')}: ${assignedBranch}`
                               }
                               className={`cal-day-btn${isSelected ? ' selected' : ''}${isToday && !isSelected ? ' is-today' : ''}`}
                               style={
-                                isPast 
-                                  ? { opacity: 0.3, cursor: 'not-allowed', background: 'rgba(255,255,255,0.02)', pointerEvents: 'none' } 
-                                  : { flexDirection: 'column', padding: '2px 0', height: '42px', position: 'relative' }
+                                isOnVacation
+                                  ? { background: 'rgba(245, 158, 11, 0.12)', border: '1px dashed rgba(245, 158, 11, 0.45)', opacity: 0.88, cursor: 'not-allowed', flexDirection: 'column', padding: '2px 0', height: '42px', position: 'relative' }
+                                  : isPast 
+                                    ? { opacity: 0.3, cursor: 'not-allowed', background: 'rgba(255,255,255,0.02)', pointerEvents: 'none' } 
+                                    : { flexDirection: 'column', padding: '2px 0', height: '42px', position: 'relative' }
                               }
                             >
-                              <span style={{ fontSize: '0.8rem', fontWeight: isSelected ? 800 : 600 }}>{format(d, 'd')}</span>
+                              <span style={{ fontSize: '0.8rem', fontWeight: isSelected ? 800 : 600, color: isOnVacation ? 'var(--accent-gold)' : undefined }}>
+                                {format(d, 'd')}
+                              </span>
                               
-                              {isSelected ? (
+                              {isOnVacation ? (
+                                <span style={{ fontSize: '0.52rem', fontWeight: 800, color: 'var(--accent-gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '95%' }}>
+                                  🏖️ Vacation
+                                </span>
+                              ) : isSelected ? (
                                 <span style={{ fontSize: '0.55rem', fontWeight: 800, color: 'var(--accent-gold)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '95%' }}>
                                   📍 {locationMode === 'per_date' ? assignedBranch : formBranch}
                                 </span>
