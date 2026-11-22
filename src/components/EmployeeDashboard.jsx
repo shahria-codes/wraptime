@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { db, collection, doc, setDoc, updateDoc, onSnapshot } from '../firebase';
+import { db, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from '../firebase';
 import { useBranches } from '../context/BranchContext';
+import { useNotifications, formatSingleName } from '../context/NotificationContext';
 import { UserAvatar } from './UserAvatar';
 import { ShiftSwapModal } from './ShiftSwapModal';
 import { VacationModal } from './VacationModal';
@@ -44,6 +45,8 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
   const { userProfile } = useAuth();
   const { showAlert } = useToast();
   const { branchNames, getBranchHoursForDate } = useBranches();
+  const { notifications = [], handleCancelSwap } = useNotifications();
+  const [cancellingSwapId, setCancellingSwapId] = useState(null);
 
   // Accordion state for roster branch cards (mutually exclusive: expanding one closes any other)
   const [expandedRosterBranches, setExpandedRosterBranches] = useState({});
@@ -171,9 +174,30 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
     return shifts.filter(s => s.userId === myUid || (userProfile?.displayName && s.userDisplayName === userProfile?.displayName));
   }, [shifts, myUid, userProfile?.displayName]);
 
-  // Today reference
-  const today = useMemo(() => startOfDay(new Date()), []);
+  // Today reference - dynamically updates when live currentTime crosses midnight
+  const today = useMemo(() => startOfDay(currentTime), [currentTime]);
   const todayStr = useMemo(() => format(today, 'yyyy-MM-dd'), [today]);
+
+  // Helper: check whether check-in window is open (only within 1 hour 30 min before branch/shift opening)
+  const getShiftCheckInWindow = (shift, now = currentTime) => {
+    if (!shift || !shift.date) return { isOpen: false, opensAtStr: '08:30', openingTimeStr: '10:00' };
+
+    const branchHours = getBranchHoursForDate ? getBranchHoursForDate(shift.branch, shift.date) : null;
+    const openingTimeStr = (branchHours && !branchHours.closed && branchHours.open)
+      ? branchHours.open
+      : (shift.startTime || '09:00');
+
+    const [openHour, openMinute] = openingTimeStr.split(':').map(Number);
+    const [year, month, day] = shift.date.split('-').map(Number);
+
+    const openDate = new Date(year, month - 1, day, openHour, openMinute, 0, 0);
+    const windowStartDate = new Date(openDate.getTime() - 90 * 60 * 1000); // 90 mins (1h 30m) before opening
+
+    const opensAtStr = format(windowStartDate, 'HH:mm');
+    const isOpen = now.getTime() >= windowStartDate.getTime();
+
+    return { isOpen, opensAtStr, openingTimeStr };
+  };
 
   // Helper: check if a shift's scheduled time window has already ended without check-in
   const isShiftTimeExpired = (shift, now = currentTime) => {
@@ -310,9 +334,16 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
   // ── Open Check-In Modal ──
   const openCheckInModal = (shift = null) => {
     const shiftToUse = shift || todaysShift || null;
-    if (shiftToUse && isShiftTimeExpired(shiftToUse, new Date())) {
-      showAlert(`This shift ended at ${shiftToUse.endTime || '22:00'}. Check-in is closed.`, 'Check-In Closed', 'warning');
-      return;
+    if (shiftToUse) {
+      if (isShiftTimeExpired(shiftToUse, new Date())) {
+        showAlert(`This shift ended at ${shiftToUse.endTime || '22:00'}. Check-in is closed.`, 'Check-In Closed', 'warning');
+        return;
+      }
+      const windowCheck = getShiftCheckInWindow(shiftToUse, new Date());
+      if (!windowCheck.isOpen) {
+        showAlert(`Check-in for this shift opens at ${windowCheck.opensAtStr} (1 hour 30 minutes before opening time).`, 'Check-In Not Open Yet', 'warning');
+        return;
+      }
     }
     setTargetShiftForCheckIn(shiftToUse);
     const initialBranch = shiftToUse?.branch || (selectedBranch !== 'ALL' ? selectedBranch : userProfile?.branch || branchNames[0] || '');
@@ -326,6 +357,14 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
     setIsSubmitting(true);
     try {
       const now = new Date();
+      if (targetShiftForCheckIn) {
+        const windowCheck = getShiftCheckInWindow(targetShiftForCheckIn, now);
+        if (!windowCheck.isOpen) {
+          showAlert(`Check-in is only allowed within 1 hour 30 minutes before opening time (${windowCheck.opensAtStr}).`, 'Check-In Not Open Yet', 'warning');
+          setIsSubmitting(false);
+          return;
+        }
+      }
       const timeStr = format(now, 'HH:mm');
 
       if (targetShiftForCheckIn?.id) {
@@ -773,30 +812,51 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                 <span>All Done For Today</span>
               </div>
             ) : todaysShift ? (
-              <button
-                type="button"
-                onClick={() => openCheckInModal(todaysShift)}
-                style={{
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-                  color: '#FFF',
-                  padding: '0.7rem 1.4rem',
-                  borderRadius: '12px',
-                  fontWeight: 800,
-                  fontSize: '0.88rem',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  boxShadow: '0 4px 16px rgba(16, 185, 129, 0.35)',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-              >
-                <LogIn size={17} />
-                Check In ({todaysShift.branch})
-              </button>
+              (() => {
+                const windowCheck = getShiftCheckInWindow(todaysShift, currentTime);
+                return windowCheck.isOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => openCheckInModal(todaysShift)}
+                    style={{
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                      color: '#FFF',
+                      padding: '0.7rem 1.4rem',
+                      borderRadius: '12px',
+                      fontWeight: 800,
+                      fontSize: '0.88rem',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      boxShadow: '0 4px 16px rgba(16, 185, 129, 0.35)',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                  >
+                    <LogIn size={17} />
+                    Check In ({todaysShift.branch})
+                  </button>
+                ) : (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    background: 'rgba(245, 158, 11, 0.1)',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    color: 'var(--accent-gold)',
+                    padding: '0.6rem 1.1rem',
+                    borderRadius: '12px',
+                    fontWeight: 700,
+                    fontSize: '0.82rem'
+                  }}>
+                    <Clock size={15} />
+                    <span>Check-in opens at {windowCheck.opensAtStr}</span>
+                  </div>
+                );
+              })()
             ) : todaysExpiredShift ? (
               <div style={{
                 display: 'inline-flex',
@@ -1072,6 +1132,14 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                     s.userDisplayName !== userProfile?.displayName
                   );
 
+                  // Pending exchange request on this shift (sent by current employee)
+                  const pendingSwap = notifications.find(n =>
+                    n.type === 'SHIFT_SWAP_REQUEST' &&
+                    n.status === 'pending' &&
+                    n.requesterUid === myUid &&
+                    n.requesterShiftId === shift.id
+                  );
+
                   return (
                     <div 
                       key={shift.id}
@@ -1189,7 +1257,7 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                             letterSpacing: '-0.02em',
                             whiteSpace: 'nowrap'
                           }}>
-                            {format(shiftDate, 'EEEE')}
+                            {format(shiftDate, 'EE')}
                           </div>
                         </div>
 
@@ -1347,7 +1415,7 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             <Users size={13} style={{ color: 'var(--primary)' }} />
-                            <span>Teammates:</span>
+                            <span>Teams:</span>
                           </div>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
@@ -1426,20 +1494,21 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                         </div>
                       )}
 
-                      {/* ── Footer Row: In-Out Time on the Left & Swap Shift Button on the Right ── */}
-                      {(isShiftCompleted || (!isShiftActive && !isExpired)) && (
-                        <div style={{
-                          marginTop: '0.75rem',
-                          paddingTop: '0.65rem',
-                          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '0.5rem',
-                          flexWrap: 'wrap'
-                        }}>
-                          {/* In/Out time on the left */}
+                      {/* ── Unified Action & In/Out Row ── */}
+                      <div style={{
+                        marginTop: '0.75rem',
+                        paddingTop: '0.65rem',
+                        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '0.5rem',
+                        flexWrap: 'wrap'
+                      }}>
+                        {/* Left Side: Check-in/out button, or In/Out time when completed, or Missed tag */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                           {isShiftCompleted ? (
+                            /* Only shown after check-out is complete */
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                               <CheckCircle2 size={13} style={{ color: 'var(--success)', flexShrink: 0 }} />
                               <span>
@@ -1448,10 +1517,192 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                                 Out: <strong style={{ color: '#FFFFFF', fontWeight: 700 }}>{shift.checkOutTime || shift.endTime || '22:00'}</strong>
                               </span>
                             </div>
-                          ) : <div />}
+                          ) : isShiftActive ? (
+                            /* Currently active shift: show check-in time + Check Out Now button */
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: '#34D399', fontWeight: 700 }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34D399', boxShadow: '0 0 8px #34D399' }} />
+                                <span>In: {shift.checkInTime}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openCheckOutModal(shift)}
+                                style={{
+                                  border: 'none',
+                                  background: 'linear-gradient(135deg, #EF4444, #DC2626)',
+                                  color: '#FFF',
+                                  padding: '0.32rem 0.75rem',
+                                  borderRadius: '8px',
+                                  fontWeight: 700,
+                                  fontSize: '0.72rem',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.3rem',
+                                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                <LogOut size={12} /> Check Out Now
+                              </button>
+                            </div>
+                          ) : isExpired ? (
+                            /* Shift ended without check-in: show Missed tag */
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                background: 'rgba(239, 68, 68, 0.15)',
+                                border: '1px solid rgba(239, 68, 68, 0.35)',
+                                color: '#F87171',
+                                padding: '0.2rem 0.55rem',
+                                borderRadius: '6px',
+                                fontSize: '0.7rem',
+                                fontWeight: 800,
+                                textTransform: 'uppercase'
+                              }}>
+                                <XCircle size={11} /> Missed
+                              </span>
+                            
+                            </div>
+                          ) : isToday ? (
+                            /* Today's shift: check if 1:30h before opening window is open */
+                            (() => {
+                              const windowCheck = getShiftCheckInWindow(shift, currentTime);
+                              return windowCheck.isOpen ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openCheckInModal(shift)}
+                                  style={{
+                                    border: 'none',
+                                    background: 'linear-gradient(135deg, #10B981, #059669)',
+                                    color: '#FFF',
+                                    padding: '0.32rem 0.8rem',
+                                    borderRadius: '8px',
+                                    fontWeight: 800,
+                                    fontSize: '0.74rem',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    boxShadow: '0 2px 10px rgba(16, 185, 129, 0.35)',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  <LogIn size={13} /> Check In Now
+                                </button>
+                              ) : (
+                                <div style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  background: 'rgba(245, 158, 11, 0.08)',
+                                  border: '1px solid rgba(245, 158, 11, 0.25)',
+                                  color: 'var(--accent-gold)',
+                                  padding: '0.25rem 0.6rem',
+                                  borderRadius: '7px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700
+                                }}>
+                                  <Clock size={11} />
+                                  <span>Check-in at {windowCheck.opensAtStr}</span>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <div />
+                          )}
+                        </div>
 
-                          {/* Swap Shift button on the right */}
-                          {!isShiftActive && !isShiftCompleted && !isExpired && (
+                        {/* Right Side: Swap Shift button or Swap Pending with click-to-cancel */}
+                        {!isShiftActive && !isShiftCompleted && !isExpired && (
+                          pendingSwap ? (
+                            cancellingSwapId === pendingSwap.id ? (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await handleCancelSwap(pendingSwap.id);
+                                    setCancellingSwapId(null);
+                                  }}
+                                  title="Confirm cancellation of this exchange request"
+                                  style={{
+                                    background: 'rgba(239, 68, 68, 0.2)',
+                                    border: '1px solid #EF4444',
+                                    color: '#FCA5A5',
+                                    padding: '0.28rem 0.65rem',
+                                    borderRadius: '8px',
+                                    fontSize: '0.72rem',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    boxShadow: '0 0 10px rgba(239, 68, 68, 0.3)',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  <X size={12} /> Cancel Request?
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCancellingSwapId(null);
+                                  }}
+                                  title="Keep this request"
+                                  style={{
+                                    background: 'rgba(255, 255, 255, 0.08)',
+                                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                                    color: 'var(--text-muted)',
+                                    padding: '0.28rem 0.5rem',
+                                    borderRadius: '8px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  Keep
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCancellingSwapId(pendingSwap.id);
+                                }}
+                                title="Click to cancel this exchange request"
+                                style={{
+                                  background: 'rgba(245, 158, 11, 0.12)',
+                                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                                  color: 'var(--accent-gold)',
+                                  padding: '0.28rem 0.7rem',
+                                  borderRadius: '8px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = 'rgba(245, 158, 11, 0.22)';
+                                  e.currentTarget.style.borderColor = 'var(--primary)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = 'rgba(245, 158, 11, 0.12)';
+                                  e.currentTarget.style.borderColor = 'rgba(245, 158, 11, 0.35)';
+                                }}
+                              >
+                                <Clock size={12} /> Swap Pending ({pendingSwap.recipientSingleName || formatSingleName(pendingSwap.recipientName)})
+                              </button>
+                            )
+                          ) : (
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); openSwapModal(shift); }}
@@ -1481,95 +1732,9 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                             >
                               <ArrowLeftRight size={13} /> Swap Shift
                             </button>
-                          )}
-                        </div>
-                      )}
-
-                      {/* ── Check-In / Check-Out Actions on Today's Card ── */}
-                      {isToday && (
-                        <div style={{
-                          marginTop: '0.85rem',
-                          paddingTop: '0.75rem',
-                          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          flexWrap: 'wrap',
-                          gap: '0.6rem'
-                        }}>
-                          {isShiftActive ? (
-                            <>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', color: '#34D399', fontWeight: 700 }}>
-                                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#34D399', boxShadow: '0 0 8px #34D399' }} />
-                                <span>Checked in at {shift.checkInTime}</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => openCheckOutModal(shift)}
-                                style={{
-                                  border: 'none',
-                                  background: 'linear-gradient(135deg, #EF4444, #DC2626)',
-                                  color: '#FFF',
-                                  padding: '0.45rem 0.95rem',
-                                  borderRadius: '9px',
-                                  fontWeight: 700,
-                                  fontSize: '0.78rem',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.35rem',
-                                  boxShadow: '0 2px 10px rgba(239, 68, 68, 0.3)'
-                                }}
-                              >
-                                <LogOut size={14} /> Check Out Now
-                              </button>
-                            </>
-                          ) : isShiftCompleted ? null : isExpired ? (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#F87171', fontWeight: 600 }}>
-                                <XCircle size={13} /> Shift ended ({shift.startTime} - {shift.endTime}) • Not checked in
-                              </span>
-                              <span style={{
-                                padding: '0.35rem 0.75rem',
-                                borderRadius: '8px',
-                                fontSize: '0.72rem',
-                                fontWeight: 700,
-                                background: 'rgba(255, 255, 255, 0.05)',
-                                color: 'var(--text-muted)',
-                                border: '1px solid rgba(255, 255, 255, 0.08)'
-                              }}>
-                                Ended
-                              </span>
-                            </div>
-                          ) : (
-                            <>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                Scheduled for today • Ready to work?
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => openCheckInModal(shift)}
-                                style={{
-                                  border: 'none',
-                                  background: 'linear-gradient(135deg, #10B981, #059669)',
-                                  color: '#FFF',
-                                  padding: '0.45rem 0.95rem',
-                                  borderRadius: '9px',
-                                  fontWeight: 700,
-                                  fontSize: '0.78rem',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.35rem',
-                                  boxShadow: '0 2px 10px rgba(16, 185, 129, 0.3)'
-                                }}
-                              >
-                                <LogIn size={14} /> Check In Now
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
+                          )
+                        )}
+                      </div>
 
                     </div>
                   );
@@ -1672,18 +1837,61 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                       alignItems: 'center',
                       justifyContent: 'space-between'
                     }}>
-                      <div>
-                        <div style={{ 
-                          fontSize: '0.72rem', 
-                          textTransform: 'uppercase', 
-                          fontWeight: 800, 
-                          color: isToday ? 'var(--primary)' : 'var(--text-muted)',
-                          letterSpacing: '0.05em'
+                      {/* Calendar Date Block + Short Day Name */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          width: '38px',
+                          borderRadius: '9px',
+                          overflow: 'hidden',
+                          border: isToday 
+                            ? '1px solid rgba(245, 158, 11, 0.6)' 
+                            : '1px solid rgba(255, 255, 255, 0.12)',
+                          boxShadow: isToday 
+                            ? '0 3px 10px rgba(245, 158, 11, 0.25)' 
+                            : '0 2px 6px rgba(0,0,0,0.25)',
+                          flexShrink: 0
                         }}>
-                          {format(dayDate, 'EEEE')}
+                          <div style={{
+                            background: isToday ? 'var(--primary)' : 'rgba(255, 255, 255, 0.08)',
+                            color: isToday ? '#0F172A' : 'var(--text-muted)',
+                            fontSize: '0.55rem',
+                            fontWeight: 900,
+                            letterSpacing: '0.06em',
+                            textTransform: 'uppercase',
+                            textAlign: 'center',
+                            padding: '2px 0',
+                            lineHeight: 1
+                          }}>
+                            {format(dayDate, 'MMM')}
+                          </div>
+                          <div style={{
+                            background: 'rgba(11, 19, 38, 0.95)',
+                            color: '#FFFFFF',
+                            fontSize: '0.98rem',
+                            fontWeight: 900,
+                            textAlign: 'center',
+                            padding: '3px 0 2px',
+                            lineHeight: 1.1,
+                            fontFamily: 'var(--font-heading)'
+                          }}>
+                            {format(dayDate, 'dd')}
+                          </div>
                         </div>
-                        <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-main)', marginTop: '1px' }}>
-                          {format(dayDate, 'MMM dd')}
+
+                        {/* Day Name (Short form: Mon, Tue, etc.) */}
+                        <div style={{
+                          fontSize: '0.92rem',
+                          fontWeight: 800,
+                          color: isToday ? 'var(--primary)' : 'var(--text-main)',
+                          letterSpacing: '-0.01em',
+                          lineHeight: 1.15,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}>
+                          {format(dayDate, 'EEE')}
                         </div>
                       </div>
 
@@ -1711,7 +1919,36 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                         </div>
                       ) : (
                         (() => {
-                          const shiftsByBranch = dayShifts.reduce((acc, shift) => {
+                          // Prevent duplicate shifts for the same person on the same day across branches
+                          const seenDayStaffIds = new Set();
+                          const seenDayStaffNames = new Set();
+                          const sortedDayShifts = [...dayShifts].sort((a, b) => {
+                            if (a.status === 'checked-in' && b.status !== 'checked-in') return -1;
+                            if (b.status === 'checked-in' && a.status !== 'checked-in') return 1;
+                            if (a.status === 'completed' && b.status !== 'completed') return -1;
+                            if (b.status === 'completed' && a.status !== 'completed') return 1;
+                            return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '');
+                          });
+
+                          const uniqueDayShifts = sortedDayShifts.filter(s => {
+                            const idKey = (s.userId || '').toLowerCase().trim();
+                            const resolvedName = s.userDisplayName || employeeMap[s.userId]?.displayName || '';
+                            const nameKey = resolvedName.toLowerCase().trim();
+
+                            const isDuplicateId = Boolean(idKey && seenDayStaffIds.has(idKey));
+                            const isDuplicateName = Boolean(nameKey && seenDayStaffNames.has(nameKey));
+
+                            if (isDuplicateId || isDuplicateName) {
+                              if (s.id) deleteDoc(doc(db, 'shifts', s.id)).catch(() => {});
+                              return false;
+                            }
+
+                            if (idKey) seenDayStaffIds.add(idKey);
+                            if (nameKey) seenDayStaffNames.add(nameKey);
+                            return true;
+                          });
+
+                          const shiftsByBranch = uniqueDayShifts.reduce((acc, shift) => {
                             const b = shift.branch || 'Unassigned';
                             if (!acc[b]) acc[b] = [];
                             acc[b].push(shift);

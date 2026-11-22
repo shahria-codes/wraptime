@@ -409,19 +409,30 @@ export const ManagerDashboard = ({ selectedBranch }) => {
       const targetUid = selectedUserIds[0] || formUserId;
       const selectedEmp = employees.find(emp => (emp.uid || emp.id) === targetUid);
       const empName = selectedEmp ? selectedEmp.displayName : 'Employee';
+      const targetDate = selectedDates[0];
 
       let empBranch = formBranch;
-      if (locationMode === 'per_date' && dateBranches[selectedDates[0]]) {
-        empBranch = dateBranches[selectedDates[0]];
+      if (locationMode === 'per_date' && dateBranches[targetDate]) {
+        empBranch = dateBranches[targetDate];
       } else if (locationMode === 'per_employee' && userBranches[targetUid]) {
         empBranch = userBranches[targetUid];
+      }
+
+      // Check if employee already has another shift on targetDate (clean duplicates)
+      const otherShiftsOnDate = shifts.filter(s =>
+        s.id !== editingShift.id &&
+        (s.userId === targetUid || (s.userDisplayName && empName && s.userDisplayName.trim().toLowerCase() === empName.trim().toLowerCase())) &&
+        s.date === targetDate
+      );
+      for (const other of otherShiftsOnDate) {
+        await deleteDoc(doc(db, 'shifts', other.id));
       }
 
       const shiftData = {
         userId: targetUid,
         userDisplayName: empName,
         branch: empBranch,
-        date: selectedDates[0],
+        date: targetDate,
         startTime: formStartTime,
         endTime: formEndTime,
         breakMinutes: autoBreak,
@@ -444,9 +455,17 @@ export const ManagerDashboard = ({ selectedBranch }) => {
             empBranch = userBranches[uId];
           }
 
-          const existingShift = shifts.find(s => s.userId === uId && s.date === dStr);
-          if (existingShift) {
-            await updateDoc(doc(db, 'shifts', existingShift.id), {
+          // Check if employee already has shifts on dStr
+          const matchingShifts = shifts.filter(s =>
+            (s.userId === uId || (s.userDisplayName && empName && s.userDisplayName.trim().toLowerCase() === empName.trim().toLowerCase())) &&
+            s.date === dStr
+          );
+
+          if (matchingShifts.length > 0) {
+            // Update primary shift to allow changing branch on the same day
+            const primary = matchingShifts[0];
+            await updateDoc(doc(db, 'shifts', primary.id), {
+              userId: uId,
               userDisplayName: empName,
               branch: empBranch,
               startTime: formStartTime,
@@ -456,6 +475,11 @@ export const ManagerDashboard = ({ selectedBranch }) => {
               note: formNote,
               updatedAt: new Date().toISOString()
             });
+
+            // Clean any redundant duplicate shifts
+            for (let i = 1; i < matchingShifts.length; i++) {
+              await deleteDoc(doc(db, 'shifts', matchingShifts[i].id));
+            }
           } else {
             const newDocRef = doc(collection(db, 'shifts'));
             await setDoc(newDocRef, {
@@ -602,12 +626,60 @@ export const ManagerDashboard = ({ selectedBranch }) => {
             >
               {/* Day Header */}
               <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 700, color: isToday ? 'var(--primary)' : isDayInPast ? 'var(--text-subtle)' : 'var(--text-muted)' }}>
-                    {format(dayDate, 'EEE')}
+                {/* Calendar Date Block */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    width: '36px',
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                    border: isToday 
+                      ? '1px solid rgba(245, 158, 11, 0.6)' 
+                      : '1px solid rgba(255, 255, 255, 0.12)',
+                    boxShadow: isToday 
+                      ? '0 3px 10px rgba(245, 158, 11, 0.25)' 
+                      : '0 2px 6px rgba(0,0,0,0.25)',
+                    flexShrink: 0
+                  }}>
+                    <div style={{
+                      background: isToday ? 'var(--primary)' : 'rgba(255, 255, 255, 0.08)',
+                      color: isToday ? '#0F172A' : 'var(--text-muted)',
+                      fontSize: '0.52rem',
+                      fontWeight: 900,
+                      letterSpacing: '0.06em',
+                      textTransform: 'uppercase',
+                      textAlign: 'center',
+                      padding: '2px 0',
+                      lineHeight: 1
+                    }}>
+                      {format(dayDate, 'MMM')}
+                    </div>
+                    <div style={{
+                      background: 'rgba(11, 19, 38, 0.95)',
+                      color: isDayInPast ? 'var(--text-muted)' : '#FFFFFF',
+                      fontSize: '0.92rem',
+                      fontWeight: 900,
+                      textAlign: 'center',
+                      padding: '2px 0',
+                      lineHeight: 1.1,
+                      fontFamily: 'var(--font-heading)'
+                    }}>
+                      {format(dayDate, 'dd')}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 800, color: isDayInPast ? 'var(--text-muted)' : 'var(--text-main)' }}>
-                    {format(dayDate, 'MMM dd')}
+
+                  <div style={{
+                    fontSize: '0.85rem',
+                    fontWeight: 800,
+                    color: isToday ? 'var(--primary)' : isDayInPast ? 'var(--text-subtle)' : 'var(--text-main)',
+                    letterSpacing: '-0.01em',
+                    lineHeight: 1.15,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}>
+                    {format(dayDate, 'EEE')}
                   </div>
                 </div>
 
@@ -670,7 +742,36 @@ export const ManagerDashboard = ({ selectedBranch }) => {
                   </div>
                 ) : (
                   (() => {
-                    const shiftsByBranch = dayShifts.reduce((acc, shift) => {
+                    // Prevent duplicate shifts for the same person on the same day across branches
+                    const seenDayStaffIds = new Set();
+                    const seenDayStaffNames = new Set();
+                    const sortedDayShifts = [...dayShifts].sort((a, b) => {
+                      if (a.status === 'checked-in' && b.status !== 'checked-in') return -1;
+                      if (b.status === 'checked-in' && a.status !== 'checked-in') return 1;
+                      if (a.status === 'completed' && b.status !== 'completed') return -1;
+                      if (b.status === 'completed' && a.status !== 'completed') return 1;
+                      return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '');
+                    });
+
+                    const uniqueDayShifts = sortedDayShifts.filter(s => {
+                      const idKey = (s.userId || '').toLowerCase().trim();
+                      const resolvedName = s.userDisplayName || employees.find(e => e.id === s.userId)?.displayName || '';
+                      const nameKey = resolvedName.toLowerCase().trim();
+
+                      const isDuplicateId = Boolean(idKey && seenDayStaffIds.has(idKey));
+                      const isDuplicateName = Boolean(nameKey && seenDayStaffNames.has(nameKey));
+
+                      if (isDuplicateId || isDuplicateName) {
+                        if (s.id) deleteDoc(doc(db, 'shifts', s.id)).catch(() => {});
+                        return false;
+                      }
+
+                      if (idKey) seenDayStaffIds.add(idKey);
+                      if (nameKey) seenDayStaffNames.add(nameKey);
+                      return true;
+                    });
+
+                    const shiftsByBranch = uniqueDayShifts.reduce((acc, shift) => {
                       const b = shift.branch || 'Unassigned';
                       if (!acc[b]) acc[b] = [];
                       acc[b].push(shift);

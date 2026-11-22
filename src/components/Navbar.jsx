@@ -123,7 +123,6 @@ export const Navbar = ({ selectedBranch, setSelectedBranch }) => {
           {/* Branch Selector — hidden on profile pages */}
           {!path.startsWith('/profile') && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flex: '0 1 auto' }}>
-              <Store size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
               <select
                 className="form-select nav-branch-select"
                 value={selectedBranch}

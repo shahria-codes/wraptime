@@ -557,18 +557,21 @@ export const NotificationCenter = () => {
                               disabled={isProcessing}
                               onClick={(e) => onCancelSwap(item, e)}
                               style={{
-                                background: 'none',
-                                border: 'none',
+                                background: 'rgba(239, 68, 68, 0.12)',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
                                 color: '#F87171',
-                                cursor: 'pointer',
-                                fontSize: '0.68rem',
-                                fontWeight: 600,
+                                cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                padding: '0.25rem 0.6rem',
+                                borderRadius: '7px',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '0.2rem'
+                                gap: '0.25rem',
+                                transition: 'all 0.15s ease'
                               }}
                             >
-                              <Trash2 size={11} /> Cancel
+                              <Trash2 size={11} /> Cancel Request
                             </button>
                           </div>
                         ) : (

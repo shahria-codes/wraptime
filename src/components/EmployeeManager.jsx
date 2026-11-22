@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { UserAvatar } from './UserAvatar';
-import { db, collection, onSnapshot, doc, updateDoc } from '../firebase';
+import { db, collection, onSnapshot, doc, updateDoc, setDoc } from '../firebase';
 import { useBranches } from '../context/BranchContext';
 import {
   Users, CheckCircle2, XCircle, ShieldCheck, UserCheck,
@@ -252,15 +252,26 @@ const EmployeeCard = ({ user, isSelf, shifts, onStatus, onBranch, navigate }) =>
             <Store size={12} color="var(--primary)" style={{ flexShrink: 0 }} />
             <select
               className="form-select"
-              style={{ fontSize: '0.76rem', padding: '4px 8px', borderRadius: '8px', fontFamily: 'var(--font-body)', fontWeight: 600, flex: 1, minWidth: 0 }}
-              value={user.defaultBranch || (branchNames[0] || '')}
+              style={{
+                fontSize: '0.76rem',
+                padding: '4px 8px',
+                borderRadius: '8px',
+                fontFamily: 'var(--font-body)',
+                fontWeight: 600,
+                flex: 1,
+                minWidth: 0,
+                color: (user.defaultBranch || user.assignedBranch) ? 'var(--text-main)' : 'var(--accent-gold)',
+                border: (user.defaultBranch || user.assignedBranch) ? '1px solid rgba(255,255,255,0.12)' : '1px dashed rgba(245, 158, 11, 0.6)',
+                background: (user.defaultBranch || user.assignedBranch) ? 'rgba(30, 41, 59, 0.6)' : 'rgba(245, 158, 11, 0.08)',
+                cursor: 'pointer'
+              }}
+              value={user.defaultBranch || user.assignedBranch || ''}
               onChange={e => onBranch(uid, e.target.value)}
             >
-              {branchNames.length === 0 ? (
-                <option value="">No branches configured</option>
-              ) : (
-                branchNames.map(b => <option key={b} value={b}>{b}</option>)
-              )}
+              <option value="">Select branch…</option>
+              {branchNames.map(b => (
+                <option key={b} value={b}>{b}</option>
+              ))}
             </select>
           </div>
         )}
@@ -378,7 +389,23 @@ export const EmployeeManager = () => {
   };
 
   const updateUserBranch = async (uid, defaultBranch) => {
-    await updateDoc(doc(db, 'users', uid), { defaultBranch, updatedAt: new Date().toISOString() });
+    try {
+      if (!uid) {
+        showAlert('User ID is missing.', 'Error', 'error');
+        return;
+      }
+      await setDoc(doc(db, 'users', uid), {
+        defaultBranch: defaultBranch || '',
+        assignedBranch: defaultBranch || '',
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      const branchText = defaultBranch ? `assigned to ${defaultBranch}` : 'set to Unassigned';
+      showAlert(`Employee branch ${branchText} successfully!`, 'Branch Saved', 'success');
+    } catch (err) {
+      console.error('Error updating user branch:', err);
+      showAlert('Failed to save branch: ' + err.message, 'Database Error', 'error');
+    }
   };
 
   const pendingCount = users.filter(u => u.status === 'pending').length;

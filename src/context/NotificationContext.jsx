@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
-import { db, collection, doc, updateDoc, setDoc, deleteDoc, onSnapshot, query, orderBy } from '../firebase';
+import { db, collection, doc, getDoc, getDocs, updateDoc, setDoc, deleteDoc, onSnapshot, query, orderBy } from '../firebase';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { isBranchManager } from './BranchContext';
@@ -354,30 +354,53 @@ export const NotificationProvider = ({ children }) => {
     try {
       const now = new Date().toISOString();
 
+      // 0. Safety check: prevent double scheduling on the same date
+      if (notif.requesterShiftDate && notif.targetShiftDate && notif.requesterShiftDate !== notif.targetShiftDate) {
+        const shiftsSnap = await getDocs(collection(db, 'shifts'));
+        const currentShifts = shiftsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const recipientConflict = currentShifts.some(s =>
+          s.id !== notif.targetShiftId &&
+          (s.userId === notif.recipientUid || (s.userDisplayName && notif.recipientName && s.userDisplayName.trim().toLowerCase() === notif.recipientName.trim().toLowerCase())) &&
+          s.date === notif.requesterShiftDate
+        );
+
+        const requesterConflict = currentShifts.some(s =>
+          s.id !== notif.requesterShiftId &&
+          (s.userId === notif.requesterUid || (s.userDisplayName && notif.requesterName && s.userDisplayName.trim().toLowerCase() === notif.requesterName.trim().toLowerCase())) &&
+          s.date === notif.targetShiftDate
+        );
+
+        if (recipientConflict || requesterConflict) {
+          showAlert('Cannot approve exchange: An employee already has another shift scheduled on this date. An employee cannot work multiple shifts on the same day.', 'Schedule Conflict', 'warning');
+          return;
+        }
+      }
+
       // 1. Swap ownership of the two shifts in Firestore
       if (notif.requesterShiftId && notif.targetShiftId) {
         // Shift 1 (requester's original shift) is assigned to recipient
-        await updateDoc(doc(db, 'shifts', notif.requesterShiftId), {
-          userId: notif.recipientUid,
-          userDisplayName: notif.recipientName,
+        await setDoc(doc(db, 'shifts', notif.requesterShiftId), {
+          userId: notif.recipientUid || '',
+          userDisplayName: notif.recipientName || 'Colleague',
           updatedAt: now
-        });
+        }, { merge: true });
 
         // Shift 2 (target's original shift) is assigned to requester
-        await updateDoc(doc(db, 'shifts', notif.targetShiftId), {
-          userId: notif.requesterUid,
-          userDisplayName: notif.requesterName,
+        await setDoc(doc(db, 'shifts', notif.targetShiftId), {
+          userId: notif.requesterUid || '',
+          userDisplayName: notif.requesterName || 'Colleague',
           updatedAt: now
-        });
+        }, { merge: true });
       }
 
       // 2. Mark swap request notification as approved
-      await updateDoc(doc(db, 'notifications', notif.id), {
+      await setDoc(doc(db, 'notifications', notif.id), {
         status: 'approved',
         read: true,
         resolvedAt: now,
         updatedAt: now
-      });
+      }, { merge: true });
 
       // 3. Send resolution notification to the requester
       const resRef = doc(collection(db, 'notifications'));
@@ -385,16 +408,16 @@ export const NotificationProvider = ({ children }) => {
         id: resRef.id,
         type: 'SHIFT_SWAP_RESOLVED',
         status: 'approved',
-        recipientUid: notif.requesterUid, // Delivered to original requester
-        recipientName: notif.requesterName,
-        actorUid: notif.recipientUid,
-        actorName: notif.recipientName,
-        actorSingleName: formatSingleName(notif.recipientName),
+        recipientUid: notif.requesterUid || '',
+        recipientName: notif.requesterName || 'Colleague',
+        actorUid: notif.recipientUid || userProfile?.uid || '',
+        actorName: notif.recipientName || userProfile?.displayName || 'Colleague',
+        actorSingleName: formatSingleName(notif.recipientName || userProfile?.displayName),
         actorPhotoURL: notif.recipientPhotoURL || userProfile?.photoURL || '',
-        targetShiftDate: notif.targetShiftDate,
-        requesterShiftDate: notif.requesterShiftDate,
-        targetShiftBranch: notif.targetShiftBranch,
-        requesterShiftBranch: notif.requesterShiftBranch,
+        targetShiftDate: notif.targetShiftDate || '',
+        requesterShiftDate: notif.requesterShiftDate || '',
+        targetShiftBranch: notif.targetShiftBranch || '',
+        requesterShiftBranch: notif.requesterShiftBranch || '',
         title: 'Schedule Exchange Approved',
         read: false,
         createdAt: now
@@ -413,12 +436,12 @@ export const NotificationProvider = ({ children }) => {
       const now = new Date().toISOString();
 
       // 1. Mark notification as rejected
-      await updateDoc(doc(db, 'notifications', notif.id), {
+      await setDoc(doc(db, 'notifications', notif.id), {
         status: 'rejected',
         read: true,
         resolvedAt: now,
         updatedAt: now
-      });
+      }, { merge: true });
 
       // 2. Send resolution notification to the requester
       const resRef = doc(collection(db, 'notifications'));
@@ -426,16 +449,16 @@ export const NotificationProvider = ({ children }) => {
         id: resRef.id,
         type: 'SHIFT_SWAP_RESOLVED',
         status: 'rejected',
-        recipientUid: notif.requesterUid,
-        recipientName: notif.requesterName,
-        actorUid: notif.recipientUid,
-        actorName: notif.recipientName,
-        actorSingleName: formatSingleName(notif.recipientName),
+        recipientUid: notif.requesterUid || '',
+        recipientName: notif.requesterName || 'Colleague',
+        actorUid: notif.recipientUid || userProfile?.uid || '',
+        actorName: notif.recipientName || userProfile?.displayName || 'Colleague',
+        actorSingleName: formatSingleName(notif.recipientName || userProfile?.displayName),
         actorPhotoURL: notif.recipientPhotoURL || userProfile?.photoURL || '',
-        targetShiftDate: notif.targetShiftDate,
-        requesterShiftDate: notif.requesterShiftDate,
-        targetShiftBranch: notif.targetShiftBranch,
-        requesterShiftBranch: notif.requesterShiftBranch,
+        targetShiftDate: notif.targetShiftDate || '',
+        requesterShiftDate: notif.requesterShiftDate || '',
+        targetShiftBranch: notif.targetShiftBranch || '',
+        requesterShiftBranch: notif.requesterShiftBranch || '',
         title: 'Schedule Exchange Declined',
         read: false,
         createdAt: now

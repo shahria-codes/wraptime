@@ -24,7 +24,7 @@ export const ShiftSwapModal = ({
   employees = []
 }) => {
   const { userProfile } = useAuth();
-  const { handleSendSwapRequest } = useNotifications();
+  const { handleSendSwapRequest, notifications = [], handleCancelSwap } = useNotifications();
 
   const myUid = userProfile?.uid;
   const myName = userProfile?.displayName || 'You';
@@ -68,6 +68,17 @@ export const ShiftSwapModal = ({
     return myUpcomingShifts.find(s => s.id === selectedMyShiftId) || initialShift || myUpcomingShifts[0] || null;
   }, [myUpcomingShifts, selectedMyShiftId, initialShift]);
 
+  // Check if current user already sent an active pending swap request for this shift
+  const pendingSwapForCurrentShift = useMemo(() => {
+    if (!currentMyShift?.id) return null;
+    return notifications.find(n =>
+      n.type === 'SHIFT_SWAP_REQUEST' &&
+      n.status === 'pending' &&
+      n.requesterUid === myUid &&
+      n.requesterShiftId === currentMyShift.id
+    );
+  }, [notifications, myUid, currentMyShift]);
+
   // Eligible colleague shifts available for exchange
   const eligibleColleagueShifts = useMemo(() => {
     const today = startOfDay(new Date());
@@ -92,9 +103,35 @@ export const ShiftSwapModal = ({
       // If branch filter applied
       if (filterBranch !== 'ALL' && s.branch !== filterBranch) return false;
 
+      // ── PREVENT DOUBLE SHIFT CONFLICTS ON THE SAME DATE ──
+      if (currentMyShift?.date) {
+        // Case 1: Same day swap (changing branches on the same day)
+        if (s.date === currentMyShift.date) {
+          // Cannot swap with someone who is already at the same branch as me on that day
+          if (s.branch === currentMyShift.branch) return false;
+        } else {
+          // Case 2: Different dates swap
+          // 2a. Do I already have a shift on colleague's date (s.date)?
+          const iAlreadyWorkOnColleagueDate = allShifts.some(myOther =>
+            (myOther.userId === myUid || (myOther.userDisplayName && userProfile?.displayName && myOther.userDisplayName.trim().toLowerCase() === userProfile.displayName.trim().toLowerCase())) &&
+            myOther.date === s.date &&
+            myOther.id !== currentMyShift.id
+          );
+          if (iAlreadyWorkOnColleagueDate) return false;
+
+          // 2b. Does colleague already have a shift on my shift's date (currentMyShift.date)?
+          const colleagueAlreadyWorksOnMyDate = allShifts.some(colleagueOther =>
+            (colleagueOther.userId === s.userId || (colleagueOther.userDisplayName && s.userDisplayName && colleagueOther.userDisplayName.trim().toLowerCase() === s.userDisplayName.trim().toLowerCase())) &&
+            colleagueOther.date === currentMyShift.date &&
+            colleagueOther.id !== s.id
+          );
+          if (colleagueAlreadyWorksOnMyDate) return false;
+        }
+      }
+
       return true;
     }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  }, [allShifts, myUid, userProfile, filterBranch]);
+  }, [allShifts, myUid, userProfile, filterBranch, currentMyShift]);
 
   const selectedTargetShift = useMemo(() => {
     return eligibleColleagueShifts.find(s => s.id === selectedTargetShiftId) || null;
@@ -225,6 +262,50 @@ export const ShiftSwapModal = ({
         {/* Scrollable Body */}
         <div style={{ overflowY: 'auto', flex: 1, paddingRight: '0.25rem' }}>
           
+          {/* Active Pending Swap Request Notice */}
+          {pendingSwapForCurrentShift && (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.1) 100%)',
+                border: '1px solid rgba(245, 158, 11, 0.4)',
+                borderRadius: '12px',
+                padding: '0.75rem 0.9rem',
+                marginBottom: '1.25rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0, flex: 1 }}>
+                <Clock size={16} style={{ color: 'var(--accent-gold)', flexShrink: 0 }} />
+                <div style={{ fontSize: '0.78rem', color: '#FFFFFF', lineHeight: 1.35 }}>
+                  Exchange request sent to <strong style={{ color: 'var(--accent-gold)' }}>{pendingSwapForCurrentShift.recipientSingleName || formatSingleName(pendingSwapForCurrentShift.recipientName)}</strong> for {formatFriendlyDate(pendingSwapForCurrentShift.targetShiftDate)}.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleCancelSwap(pendingSwapForCurrentShift.id)}
+                title="Cancel this exchange request"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  color: '#F87171',
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '8px',
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                Cancel Request
+              </button>
+            </div>
+          )}
+
           {/* Step 1: Your Scheduled Shift */}
           <div style={{ marginBottom: '1.25rem' }}>
             <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--accent-gold)', marginBottom: '0.45rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -501,9 +582,9 @@ export const ShiftSwapModal = ({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!currentMyShift || !selectedTargetShift || isSubmitting}
+            disabled={!currentMyShift || !selectedTargetShift || isSubmitting || !!pendingSwapForCurrentShift}
             style={{
-              background: !currentMyShift || !selectedTargetShift
+              background: !currentMyShift || !selectedTargetShift || !!pendingSwapForCurrentShift
                 ? 'rgba(245, 158, 11, 0.3)'
                 : 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
               border: 'none',
@@ -512,16 +593,22 @@ export const ShiftSwapModal = ({
               borderRadius: '10px',
               fontSize: '0.84rem',
               fontWeight: 900,
-              cursor: !currentMyShift || !selectedTargetShift || isSubmitting ? 'not-allowed' : 'pointer',
+              cursor: !currentMyShift || !selectedTargetShift || isSubmitting || !!pendingSwapForCurrentShift ? 'not-allowed' : 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.45rem',
-              boxShadow: !currentMyShift || !selectedTargetShift ? 'none' : '0 4px 16px rgba(245, 158, 11, 0.4)',
+              boxShadow: !currentMyShift || !selectedTargetShift || !!pendingSwapForCurrentShift ? 'none' : '0 4px 16px rgba(245, 158, 11, 0.4)',
               transition: 'all 0.15s ease'
             }}
           >
             <Send size={14} />
-            <span>{isSubmitting ? 'Sending Request…' : 'Send Exchange Request'}</span>
+            <span>
+              {isSubmitting
+                ? 'Sending Request…'
+                : pendingSwapForCurrentShift
+                  ? 'Request Already Pending'
+                  : 'Send Exchange Request'}
+            </span>
           </button>
         </div>
 

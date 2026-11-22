@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBranches } from '../context/BranchContext';
 import { UserAvatar } from './UserAvatar';
-import { db, collection, onSnapshot, doc, updateDoc } from '../firebase';
+import { db, collection, onSnapshot, doc, updateDoc, setDoc } from '../firebase';
 import {
   Phone,
   Calendar,
@@ -297,7 +297,7 @@ const StyleTag = () => {
 export const UserProfilePage = () => {
   const { userId: paramUserId } = useParams();
   const { userProfile: currentUserProfile, user: currentUser, logout } = useAuth();
-  const { branches, getManagerBranches } = useBranches();
+  const { branches, branchNames, getManagerBranches } = useBranches();
   const navigate = useNavigate();
   const { showAlert } = useToast();
 
@@ -540,7 +540,7 @@ export const UserProfilePage = () => {
                   </span>
                 ) : (
                   <span className="badge badge-blue" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem' }}>
-                    <UserCheck size={13} /> Staff Employee
+                    <UserCheck size={13} /> Employee
                   </span>
                 )}
                 {isManager ? (
@@ -555,9 +555,45 @@ export const UserProfilePage = () => {
                       <Store size={13} /> No branches created
                     </span>
                   )
+                ) : currentUserProfile?.role === 'manager' ? (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Store size={13} color="var(--primary)" />
+                    <select
+                      className="form-select"
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        background: 'rgba(15, 23, 42, 0.9)',
+                        color: (profileUser.defaultBranch || profileUser.assignedBranch) ? 'var(--text-main)' : 'var(--accent-gold)',
+                        border: (profileUser.defaultBranch || profileUser.assignedBranch) ? '1px solid rgba(255,255,255,0.15)' : '1px dashed var(--accent-gold)',
+                        cursor: 'pointer'
+                      }}
+                      value={profileUser.defaultBranch || profileUser.assignedBranch || ''}
+                      onChange={async (e) => {
+                        const newBranch = e.target.value;
+                        try {
+                          await setDoc(doc(db, 'users', targetUid), {
+                            defaultBranch: newBranch || '',
+                            assignedBranch: newBranch || '',
+                            updatedAt: new Date().toISOString()
+                          }, { merge: true });
+                          showAlert(`Assigned branch updated to ${newBranch || 'Unassigned'}.`, 'Branch Saved', 'success');
+                        } catch (err) {
+                          console.error('Error updating user branch from profile:', err);
+                          showAlert('Failed to save branch: ' + err.message, 'Database Error', 'error');
+                        }
+                      }}
+                    >
+                      <option value="">Select branch…</option>
+                      {(branchNames || []).map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
                 ) : (
-                  <span className="badge" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                    <Store size={13} /> {profileUser.defaultBranch || 'Unassigned'}
+                  <span className="badge" style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '0.3rem', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: (profileUser.defaultBranch || profileUser.assignedBranch) ? 'var(--text-main)' : 'var(--accent-gold)' }}>
+                    <Store size={13} /> {profileUser.defaultBranch || profileUser.assignedBranch || 'Unassigned'}
                   </span>
                 )}
                 {(profileUser.dobMonth || profileUser.dobDay) && (
