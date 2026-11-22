@@ -1058,6 +1058,12 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                   const isShiftCompleted = shift.status === 'completed' || (shift.checkInTime && shift.checkOutTime);
                   const isExpired = isShiftTimeExpired(shift, currentTime);
 
+                  // Branch operating hours for this specific date
+                  const branchHours = getBranchHoursForDate ? getBranchHoursForDate(shift.branch, shift.date) : null;
+                  const operatingHoursText = (branchHours && !branchHours.closed && branchHours.open && branchHours.close)
+                    ? `${branchHours.open} - ${branchHours.close}`
+                    : '09:00 - 22:00';
+
                   // Find coworkers scheduled on this same date and branch
                   const coworkers = shifts.filter(s => 
                     s.date === shift.date && 
@@ -1322,7 +1328,7 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                             <MapPin size={11} style={{ color: 'var(--primary)' }} />
                             <span>{shift.branch}</span>
                             <span style={{ color: 'rgba(255,255,255,0.35)' }}>•</span>
-                            <span>{shift.startTime || '09:00'} - {shift.endTime || '22:00'}</span>
+                            <span>{operatingHoursText}</span>
                           </span>
                         </div>
 
@@ -1420,45 +1426,62 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                         </div>
                       )}
 
-                      {/* ── Shift Swap Button (upcoming, not active/completed/expired) ── */}
-                      {!isShiftActive && !isShiftCompleted && !isExpired && (
+                      {/* ── Footer Row: In-Out Time on the Left & Swap Shift Button on the Right ── */}
+                      {(isShiftCompleted || (!isShiftActive && !isExpired)) && (
                         <div style={{
                           marginTop: '0.75rem',
                           paddingTop: '0.65rem',
                           borderTop: '1px solid rgba(255, 255, 255, 0.06)',
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'flex-end'
+                          justifyContent: 'space-between',
+                          gap: '0.5rem',
+                          flexWrap: 'wrap'
                         }}>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); openSwapModal(shift); }}
-                            title="Request to exchange this shift with a colleague"
-                            style={{
-                              background: 'rgba(56, 189, 248, 0.1)',
-                              border: '1px solid rgba(56, 189, 248, 0.3)',
-                              color: '#38BDF8',
-                              padding: '0.3rem 0.75rem',
-                              borderRadius: '8px',
-                              fontSize: '0.72rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '0.3rem',
-                              transition: 'all 0.15s ease'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = 'rgba(56, 189, 248, 0.2)';
-                              e.currentTarget.style.borderColor = '#38BDF8';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'rgba(56, 189, 248, 0.1)';
-                              e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.3)';
-                            }}
-                          >
-                            <ArrowLeftRight size={13} /> Swap Shift
-                          </button>
+                          {/* In/Out time on the left */}
+                          {isShiftCompleted ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              <CheckCircle2 size={13} style={{ color: 'var(--success)', flexShrink: 0 }} />
+                              <span>
+                                In: <strong style={{ color: '#FFFFFF', fontWeight: 700 }}>{shift.checkInTime || shift.startTime || '09:00'}</strong>
+                                <span style={{ color: 'rgba(255,255,255,0.3)', margin: '0 0.35rem' }}>•</span>
+                                Out: <strong style={{ color: '#FFFFFF', fontWeight: 700 }}>{shift.checkOutTime || shift.endTime || '22:00'}</strong>
+                              </span>
+                            </div>
+                          ) : <div />}
+
+                          {/* Swap Shift button on the right */}
+                          {!isShiftActive && !isShiftCompleted && !isExpired && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openSwapModal(shift); }}
+                              title="Request to exchange this shift with a colleague"
+                              style={{
+                                background: 'rgba(56, 189, 248, 0.1)',
+                                border: '1px solid rgba(56, 189, 248, 0.3)',
+                                color: '#38BDF8',
+                                padding: '0.3rem 0.75rem',
+                                borderRadius: '8px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = 'rgba(56, 189, 248, 0.2)';
+                                e.currentTarget.style.borderColor = '#38BDF8';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = 'rgba(56, 189, 248, 0.1)';
+                                e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.3)';
+                              }}
+                            >
+                              <ArrowLeftRight size={13} /> Swap Shift
+                            </button>
+                          )}
                         </div>
                       )}
 
@@ -1501,16 +1524,7 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
                                 <LogOut size={14} /> Check Out Now
                               </button>
                             </>
-                          ) : isShiftCompleted ? (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--success)', fontWeight: 700 }}>
-                                <CheckCircle2 size={13} /> Completed Shift
-                              </span>
-                              <span>
-                                In: <strong style={{ color: '#FFF' }}>{shift.checkInTime || shift.startTime}</strong> • Out: <strong style={{ color: '#FFF' }}>{shift.checkOutTime || shift.endTime}</strong> ({shift.actualHours || hrs}h)
-                              </span>
-                            </div>
-                          ) : isExpired ? (
+                          ) : isShiftCompleted ? null : isExpired ? (
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                               <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#F87171', fontWeight: 600 }}>
                                 <XCircle size={13} /> Shift ended ({shift.startTime} - {shift.endTime}) • Not checked in
