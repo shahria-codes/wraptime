@@ -8,6 +8,7 @@ import { useBranches } from '../context/BranchContext';
 import { UserAvatar } from './UserAvatar';
 import { ShiftSwapModal } from './ShiftSwapModal';
 import { VacationModal } from './VacationModal';
+import { syncWidgetData } from '../services/widgetSync';
 import { 
   Clock, 
   Users, 
@@ -123,6 +124,13 @@ export const EmployeeDashboard = ({ selectedBranch, activeSubTab = 'my-schedule'
       unsubscribeVacations();
     };
   }, []);
+
+  // Sync to mobile & desktop widgets in the background
+  useEffect(() => {
+    if (userProfile && shifts.length > 0) {
+      syncWidgetData({ userProfile, shifts });
+    }
+  }, [userProfile, shifts]);
 
   const employeeMap = useMemo(() => {
     const map = {};
